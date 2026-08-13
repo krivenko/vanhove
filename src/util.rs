@@ -1,7 +1,7 @@
 /// Utility functions
 use bilby::{
-    adaptive_integrate, integrate_infinite, integrate_semi_infinite_lower,
-    integrate_semi_infinite_upper,
+    QuadratureError, QuadratureResult, adaptive_integrate, integrate_infinite,
+    integrate_semi_infinite_lower, integrate_semi_infinite_upper,
 };
 
 /// Kahan-Babuška-Neumaier summation algorithm
@@ -19,9 +19,13 @@ pub fn kahan_babushka_neumaier_sum<I: Iterator<Item = f64>>(input: I) -> f64 {
     sum + c
 }
 
-/// Call a bilby adaptive integration function depending on the integration limits
-/// and unwrap the result.
-pub fn bilby_integrate<F: Fn(f64) -> f64>(f: F, a: f64, b: f64, tol: f64) -> f64 {
+/// Call a bilby adaptive integration function depending on the integration limits.
+pub fn bilby_integrate<F: Fn(f64) -> f64>(
+    f: F,
+    a: f64,
+    b: f64,
+    tol: f64,
+) -> Result<QuadratureResult<f64>, QuadratureError> {
     let a_inf = a.is_infinite();
     let b_inf = b.is_infinite();
     // Choose a bilby call depending on the integration limits
@@ -40,8 +44,6 @@ pub fn bilby_integrate<F: Fn(f64) -> f64>(f: F, a: f64, b: f64, tol: f64) -> f64
             integrate_infinite(f, tol)
         }
     }
-    .unwrap()
-    .value
 }
 
 #[cfg(test)]
@@ -64,22 +66,30 @@ mod tests {
         let pi = std::f64::consts::PI;
         let inf = std::f64::INFINITY;
         assert_abs_diff_eq!(
-            util::bilby_integrate(move |x| x.cos() * x.cos(), -pi, pi, 1e-12),
+            util::bilby_integrate(move |x| x.cos() * x.cos(), -pi, pi, 1e-12)
+                .unwrap()
+                .value,
             pi,
             epsilon = 1e-12
         );
         assert_abs_diff_eq!(
-            util::bilby_integrate(move |x| (-x * x / 2.0).exp(), -inf, inf, 1e-12),
+            util::bilby_integrate(move |x| (-x * x / 2.0).exp(), -inf, inf, 1e-12)
+                .unwrap()
+                .value,
             (2.0 * pi).sqrt(),
             epsilon = 1e-12
         );
         assert_abs_diff_eq!(
-            util::bilby_integrate(move |x| (2.0 * x).exp(), -inf, 0.0, 1e-12),
+            util::bilby_integrate(move |x| (2.0 * x).exp(), -inf, 0.0, 1e-12)
+                .unwrap()
+                .value,
             0.5,
             epsilon = 1e-12
         );
         assert_abs_diff_eq!(
-            util::bilby_integrate(move |x| (-2.0 * x).exp(), 0.0, inf, 1e-12),
+            util::bilby_integrate(move |x| (-2.0 * x).exp(), 0.0, inf, 1e-12)
+                .unwrap()
+                .value,
             0.5,
             epsilon = 1e-12
         );

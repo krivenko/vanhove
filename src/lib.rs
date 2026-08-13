@@ -3,6 +3,7 @@ mod util;
 use std::ops::{Add, Mul};
 use std::rc::Rc;
 
+use bilby::QuadratureError;
 use num_complex::Complex64;
 
 //
@@ -203,7 +204,11 @@ impl Add for DensityOfStates {
 impl DensityOfStates {
     /// Given a density of states A(ω) and a real-valued function f(ω),
     /// compute the integral ∫A(ω)f(ω)dω.
-    pub fn integrate<F: Fn(f64) -> f64>(&self, f: F, tol: Option<f64>) -> f64 {
+    pub fn integrate<F: Fn(f64) -> f64>(
+        &self,
+        f: F,
+        tol: Option<f64>,
+    ) -> Result<f64, QuadratureError> {
         let mut result = 0.0f64;
 
         // Discrete spectral contributions
@@ -224,7 +229,8 @@ impl DensityOfStates {
                 omega_min,
                 omega_max,
                 tol,
-            );
+            )?
+            .value;
 
             // Add integrals of the asymptotics
             for (p, omega_p) in cdos.sing_pos().into_iter().enumerate() {
@@ -236,21 +242,25 @@ impl DensityOfStates {
                     omega_min,
                     omega_max,
                     tol,
-                );
+                )?
+                .value;
                 // f(Ω_p) ∫S_p(ω)dω
                 res_contrib += cdos.asympt_int()[p] * f_p;
             }
 
             result += w * res_contrib;
         }
-        result
+        Ok(result)
     }
 
     /// Given a density of states A(ω) and a complex-valued function f(ω),
     /// compute the integral ∫A(ω)f(ω)dω
-    pub fn integrate_complex<F: Fn(f64) -> Complex64>(&self, f: F) -> Complex64 {
-        self.integrate(|omega| f(omega).re, None)
-            + Complex64::I * self.integrate(|omega| f(omega).im, None)
+    pub fn integrate_complex<F: Fn(f64) -> Complex64>(
+        &self,
+        f: F,
+    ) -> Result<Complex64, QuadratureError> {
+        Ok(self.integrate(|omega| f(omega).re, None)?
+            + Complex64::I * self.integrate(|omega| f(omega).im, None)?)
     }
 }
 
