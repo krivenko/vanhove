@@ -4,3 +4,8 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+bilby = "0.3.0"
+num-complex = "0.4.6"
+
+[dev-dependencies]
+approx = "0.5.1"
