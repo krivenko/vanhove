@@ -1,3 +1,4 @@
+pub mod models;
 mod util;
 
 use std::ops::{Add, Mul};
@@ -119,21 +120,31 @@ impl DiscreteDOS {
 // ContinuousDOS
 //
 
+/// Isolated integrable singularity in the DOS
+trait Singularity {
+    /// Position of the singular point
+    fn position(&self) -> f64;
+    /// Asymptotic form of the DOS near the singular point
+    fn asymptotics(&self, omega: f64) -> f64;
+}
+
 /// Continuous density of states possibly containing integrable singularities.
 /// The DOS has the form A(ω) = R(ω) + ∑_p S_p(ω) for ω ∈ [ω_{min}, ω_{max}]
 /// and zero otherwise. R(ω) is a smooth function and each S_p(ω) has one isolated
 /// integrable singularity at Ω_p. The total spectral weight is expected to be 1.
-pub trait ContinuousDOS {
+trait ContinuousDOS {
     /// Support of the DOS function specified as a segment [ω_{min}, ω_{max}]
     fn support(&self) -> (f64, f64);
     /// Regular part of the DOS, R(ω)
     fn regular(&self, omega: f64) -> f64;
-    /// Positions of singularities
-    fn sing_pos(&self) -> &[f64];
-    /// Singular contributions S_p(ω)
-    fn asymptotics(&self) -> &[Rc<dyn Fn(f64) -> f64>];
+    /// Singularities
+    fn singularities(&self) -> &[Rc<dyn Singularity>] {
+        &[]
+    }
     /// Analytically derived values of ∫S_p(ω)dω over [ω_{min}, ω_{max}].
-    fn asympt_int(&self) -> &[f64];
+    fn asympt_int(&self) -> &[f64] {
+        &[]
+    }
 }
 
 // Density of states as a weighted sum of discrete resonances and continuous contributions
@@ -233,19 +244,19 @@ impl DensityOfStates {
             .value;
 
             // Add integrals of the asymptotics
-            for (p, omega_p) in cdos.sing_pos().into_iter().enumerate() {
+            for (sing, int_p) in cdos.singularities().iter().zip(cdos.asympt_int()) {
                 // ∫S_p(ω)[f(ω) - f(Ω_p)]dω
-                let s_p = &cdos.asymptotics()[p];
-                let f_p = f(*omega_p);
+                let omega_p = sing.position();
+                let f_p = f(omega_p);
                 res_contrib += util::bilby_integrate(
-                    |omega| s_p(omega) * (f(omega) - f_p),
+                    |omega| sing.asymptotics(omega) * (f(omega) - f_p),
                     omega_min,
                     omega_max,
                     tol,
                 )?
                 .value;
-                // f(Ω_p) ∫S_p(ω)dω
-                res_contrib += cdos.asympt_int()[p] * f_p;
+                // ∫S_p(ω)dω f(Ω_p)
+                res_contrib += int_p * f_p;
             }
 
             result += w * res_contrib;
