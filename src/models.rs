@@ -133,7 +133,7 @@ pub fn semicircle(eps: f64, r: f64) -> DensityOfStates {
 #[cfg(test)]
 mod tests {
     use crate::{DensityOfStates, models};
-    use approx::assert_abs_diff_eq;
+    use approx::assert_relative_eq;
 
     fn compute_moment(dos: &DensityOfStates, order: i32) -> f64 {
         dos.integrate(|omega| omega.powi(order), None).unwrap()
@@ -151,7 +151,7 @@ mod tests {
                 .zip(&weights)
                 .map(|(level, weight)| level.powi(order) * weight)
                 .sum();
-            assert_abs_diff_eq!(moment, moment_ref);
+            assert_relative_eq!(moment, moment_ref, max_relative = 1e-10);
         }
     }
 
@@ -174,7 +174,7 @@ mod tests {
         ];
         for order in 0..=6 {
             let moment = compute_moment(&dos, order as i32);
-            assert_abs_diff_eq!(moment, moments_ref[order], epsilon = 1e-9);
+            assert_relative_eq!(moment, moments_ref[order], max_relative = 1e-10);
         }
     }
 
@@ -197,7 +197,7 @@ mod tests {
         ];
         for order in 0..=6 {
             let moment = compute_moment(&dos, order as i32);
-            assert_abs_diff_eq!(moment, moments_ref[order], epsilon = 1e-8);
+            assert_relative_eq!(moment, moments_ref[order], max_relative = 1e-10);
         }
     }
 }
