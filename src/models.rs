@@ -1,6 +1,8 @@
-use crate::{ContinuousDOS, DensityOfStates, DiscreteDOS, Resonance};
-use special::Elliptic;
+use crate::util::fermi;
 /// Model densities of states commonly used in physics
+use crate::{ContinuousDOS, DensityOfStates, DiscreteDOS, Resonance};
+
+use special::Elliptic;
 use std::rc::Rc;
 
 //
@@ -23,6 +25,53 @@ pub fn discrete(levels: &[f64], weights: &[f64]) -> DensityOfStates {
     DensityOfStates {
         discrete,
         continuous: vec![],
+    }
+}
+
+//
+// Flat DOS
+//
+
+struct FlatDOS {
+    eps: f64,
+    d: f64,
+    nu: f64,
+    prefactor: f64,
+}
+impl FlatDOS {
+    fn new(eps: f64, d: f64, nu: f64) -> FlatDOS {
+        assert!(d > 0.0, "bandwidth must be positive");
+        assert!(nu > 0.0, "inverse edge width must be positive");
+        let x = (nu * d).tanh();
+        FlatDOS {
+            eps,
+            d,
+            nu,
+            prefactor: x / (d * (1.0 + x)),
+        }
+    }
+}
+impl ContinuousDOS for FlatDOS {
+    fn support(&self) -> (f64, f64) {
+        (-f64::INFINITY, f64::INFINITY)
+    }
+    fn regular(&self, omega: f64) -> f64 {
+        self.prefactor
+            * fermi(self.nu * (omega - self.eps - self.d))
+            * fermi(-self.nu * (omega - self.eps + self.d))
+    }
+}
+
+/// Returns the normalized flat density of states centered at `eps` with half-bandwidth `d`,
+/// and smooth, Fermi-like band edges of inverse width `nu`,
+/// $$
+///     A(\omega) = \frac{1}{(d(1 + \coth(\nu d)))}
+///         \frac{1}{(\exp(\nu(\omega-\epsilon-d))+1)(\exp(-\nu(\omega-\epsilon+d))+1)}.
+/// $$
+pub fn flat(eps: f64, d: f64, nu: f64) -> DensityOfStates {
+    DensityOfStates {
+        discrete: DiscreteDOS::new(),
+        continuous: vec![(Rc::new(FlatDOS::new(eps, d, nu)), 1.0)],
     }
 }
 
@@ -58,7 +107,7 @@ impl ContinuousDOS for GaussianDOS {
 /// Returns the normalized Gaussian density of states centered at `eps` with width `sigma`,
 /// $$
 ///     A(\omega) = \frac{1}{\sqrt{2\pi\sigma^2}}
-///         \exp\left(-\frac{(\omega - \eps)^2}{2\sigma^2}\right).
+///         \exp\left(-\frac{(\omega - \epsilon)^2}{2\sigma^2}\right).
 /// $$
 pub fn gaussian(eps: f64, sigma: f64) -> DensityOfStates {
     DensityOfStates {
@@ -196,8 +245,8 @@ impl ContinuousDOS for ChainDOS {
 /// Returns the normalized density of states of a linear chain with the hopping constant `t`
 /// and the local energy level `eps`,
 /// $$
-///     A(\omega) = \frac{1}{\pi} \frac{1}{\sqrt{(2t)^2 - (\omega-\eps)^2}}
-///         \theta((2t)^2 - (\omega-\eps)^2).
+///     A(\omega) = \frac{1}{\pi} \frac{1}{\sqrt{(2t)^2 - (\omega-\epsilon)^2}}
+///         \theta((2t)^2 - (\omega-\epsilon)^2).
 /// $$
 pub fn chain(eps: f64, t: f64) -> DensityOfStates {
     DensityOfStates {
@@ -260,8 +309,8 @@ impl ContinuousDOS for SquareDOS {
 /// Returns the normalized density of states of a square lattice with the hopping constant
 /// `t` and the local energy level `eps`,
 /// $$
-///     A(\omega) = \frac{1}{2\pi^2 t} K\left(1 - \frac{(\omega-\eps)^2}{(4t)^2}\right)
-///         \theta((4t)^2 - (\omega-\eps)^2),
+///     A(\omega) = \frac{1}{2\pi^2 t} K\left(1 - \frac{(\omega-\epsilon)^2}{(4t)^2}\right)
+///         \theta((4t)^2 - (\omega-\epsilon)^2),
 /// $$
 /// where $K(m)$ is the complete elliptic integral of the first kind.
 pub fn square(eps: f64, t: f64) -> DensityOfStates {
@@ -278,6 +327,18 @@ mod tests {
 
     fn compute_moment(dos: &DensityOfStates, order: i32) -> f64 {
         dos.integrate(|omega| omega.powi(order), None).unwrap()
+    }
+
+    fn central_to_moments(eps: f64, mu2: f64, mu4: f64, mu6: f64) -> Vec<f64> {
+        vec![
+            1.0,
+            eps,
+            eps.powi(2) + mu2,
+            eps.powi(3) + 3.0 * eps * mu2,
+            eps.powi(4) + 6.0 * eps.powi(2) * mu2 + mu4,
+            eps.powi(5) + 5.0 * eps * mu4 + 10.0 * eps.powi(3) * mu2,
+            eps.powi(6) + 15.0 * eps.powi(4) * mu2 + 15.0 * eps.powi(2) * mu4 + mu6,
+        ]
     }
 
     #[test]
@@ -297,22 +358,41 @@ mod tests {
     }
 
     #[test]
+    fn flat() {
+        let eps = 0.5f64;
+        let d = 2.0f64;
+        let nu = 5.0f64;
+
+        use std::f64::consts::PI;
+        let a = nu * d;
+        let mu2 = d.powi(2) * (PI.powi(2) + a.powi(2)) / (3.0 * a.powi(2));
+        let mu4 = mu2 * (3.0 * a.powi(2) + 7.0 * PI.powi(2)) / (5.0 * nu.powi(2));
+        let mu6 = (3.0 * a.powi(6)
+            + 21.0 * a.powi(4) * PI.powi(2)
+            + 49.0 * a.powi(2) * PI.powi(4)
+            + 31.0 * PI.powi(6))
+            / (21.0 * nu.powi(6));
+        let moments_ref = central_to_moments(eps, mu2, mu4, mu6);
+
+        let dos = models::flat(eps, d, nu);
+        for order in 0..=6 {
+            let moment = compute_moment(&dos, order as i32);
+            assert_relative_eq!(moment, moments_ref[order], max_relative = 1e-10);
+        }
+    }
+
+    #[test]
     fn gaussian() {
         let eps = 1.0f64;
         let sigma = 3.0f64;
-        let dos = models::gaussian(eps, sigma);
-        let moments_ref = vec![
-            1.0,
+        let moments_ref = central_to_moments(
             eps,
-            eps.powi(2) + sigma.powi(2),
-            eps.powi(3) + 3.0 * eps * sigma.powi(2),
-            eps.powi(4) + 6.0 * eps.powi(2) * sigma.powi(2) + 3.0 * sigma.powi(4),
-            eps.powi(5) + 10.0 * eps.powi(3) * sigma.powi(2) + 15.0 * eps * sigma.powi(4),
-            eps.powi(6)
-                + 15.0 * eps.powi(4) * sigma.powi(2)
-                + 45.0 * eps.powi(2) * sigma.powi(4)
-                + 15.0 * sigma.powi(6),
-        ];
+            sigma.powi(2),
+            3.0 * sigma.powi(4),
+            15.0 * sigma.powi(6),
+        );
+
+        let dos = models::gaussian(eps, sigma);
         for order in 0..=6 {
             let moment = compute_moment(&dos, order as i32);
             assert_relative_eq!(moment, moments_ref[order], max_relative = 1e-10);
@@ -323,19 +403,15 @@ mod tests {
     fn semicircle() {
         let eps = 0.5f64;
         let t = 2.0f64;
-        let dos = models::semicircle(eps, 2.0 * t);
-        let moments_ref = vec![
-            1.0,
+        let r = 2.0 * t;
+        let moments_ref = central_to_moments(
             eps,
-            eps.powi(2) + t.powi(2),
-            eps.powi(3) + 3.0 * eps * t.powi(2),
-            eps.powi(4) + 6.0 * eps.powi(2) * t.powi(2) + 2.0 * t.powi(4),
-            eps.powi(5) + 10.0 * eps.powi(3) * t.powi(2) + 10.0 * eps * t.powi(4),
-            eps.powi(6)
-                + 15.0 * eps.powi(4) * t.powi(2)
-                + 30.0 * eps.powi(2) * t.powi(4)
-                + 5.0 * t.powi(6),
-        ];
+            r.powi(2) / 4.0,
+            r.powi(4) / 8.0,
+            5.0 * r.powi(6) / 64.0,
+        );
+
+        let dos = models::semicircle(eps, r);
         for order in 0..=6 {
             let moment = compute_moment(&dos, order as i32);
             assert_relative_eq!(moment, moments_ref[order], max_relative = 1e-10);
@@ -346,19 +422,10 @@ mod tests {
     fn chain() {
         let eps = 0.5f64;
         let t = 2.0f64;
+        let moments_ref =
+            central_to_moments(eps, 2.0 * t.powi(2), 6.0 * t.powi(4), 20.0 * t.powi(6));
+
         let dos = models::chain(eps, t);
-        let moments_ref = vec![
-            1.0,
-            eps,
-            eps.powi(2) + 2.0 * t.powi(2),
-            eps.powi(3) + 6.0 * eps * t.powi(2),
-            eps.powi(4) + 12.0 * eps.powi(2) * t.powi(2) + 6.0 * t.powi(4),
-            eps.powi(5) + 20.0 * eps.powi(3) * t.powi(2) + 30.0 * eps * t.powi(4),
-            eps.powi(6)
-                + 30.0 * eps.powi(4) * t.powi(2)
-                + 90.0 * eps.powi(2) * t.powi(4)
-                + 20.0 * t.powi(6),
-        ];
         for order in 0..=6 {
             let moment = compute_moment(&dos, order as i32);
             assert_relative_eq!(moment, moments_ref[order], max_relative = 1e-10);
@@ -369,19 +436,10 @@ mod tests {
     fn square() {
         let eps = 0.5f64;
         let t = 2.0f64;
+        let moments_ref =
+            central_to_moments(eps, 4.0 * t.powi(2), 36.0 * t.powi(4), 400.0 * t.powi(6));
+
         let dos = models::square(eps, t);
-        let moments_ref = vec![
-            1.0,
-            eps,
-            eps.powi(2) + 4.0 * t.powi(2),
-            eps.powi(3) + 12.0 * eps * t.powi(2),
-            eps.powi(4) + 24.0 * eps.powi(2) * t.powi(2) + 36.0 * t.powi(4),
-            eps.powi(5) + 40.0 * eps.powi(3) * t.powi(2) + 180.0 * eps * t.powi(4),
-            eps.powi(6)
-                + 60.0 * eps.powi(4) * t.powi(2)
-                + 540.0 * eps.powi(2) * t.powi(4)
-                + 400.0 * t.powi(6),
-        ];
         for order in 0..=6 {
             let moment = compute_moment(&dos, order as i32);
             assert_relative_eq!(moment, moments_ref[order], max_relative = 1e-10);

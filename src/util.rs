@@ -46,6 +46,15 @@ pub fn bilby_integrate<F: Fn(f64) -> f64>(
     }
 }
 
+/// Fermi step function
+pub fn fermi(x: f64) -> f64 {
+    if x <= 0.0 {
+        1.0 / (1.0 + x.exp())
+    } else {
+        1.0 - fermi(-x)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::util;
