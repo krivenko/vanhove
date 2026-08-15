@@ -249,7 +249,13 @@ impl DensityOfStates {
                 // ∫S_p(ω)[f(ω) - f(Ω_p)]dω
                 let f_p = f(omega_p);
                 res_contrib += util::bilby_integrate(
-                    |omega| cdos.asymptotics(p, omega) * (f(omega) - f_p),
+                    |omega| {
+                        if omega == omega_p {
+                            0.0
+                        } else {
+                            cdos.asymptotics(p, omega) * (f(omega) - f_p)
+                        }
+                    },
                     omega_min,
                     omega_max,
                     tol,

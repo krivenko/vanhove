@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 bilby = "0.3.0"
 num-complex = "0.4.6"
+special = "0.14.1"
 
 [dev-dependencies]
 approx = "0.5.1"

@@ -1,4 +1,5 @@
 use crate::{ContinuousDOS, DensityOfStates, DiscreteDOS, Resonance};
+use special::Elliptic;
 /// Model densities of states commonly used in physics
 use std::rc::Rc;
 
@@ -37,6 +38,7 @@ struct GaussianDOS {
 }
 impl GaussianDOS {
     fn new(eps: f64, sigma: f64) -> GaussianDOS {
+        assert!(sigma > 0.0, "width must be positive");
         GaussianDOS {
             eps,
             denom: 2.0 * sigma.powi(2),
@@ -59,7 +61,6 @@ impl ContinuousDOS for GaussianDOS {
 ///         \exp\left(-\frac{(\omega - \eps)^2}{2\sigma^2}\right).
 /// $$
 pub fn gaussian(eps: f64, sigma: f64) -> DensityOfStates {
-    assert!(sigma > 0.0, "width must be positive");
     DensityOfStates {
         discrete: DiscreteDOS::new(),
         continuous: vec![(Rc::new(GaussianDOS::new(eps, sigma)), 1.0)],
@@ -107,6 +108,7 @@ impl ContinuousDOS for SemicircleDOS {
         &self.edges
     }
     fn asymptotics(&self, p: usize, omega: f64) -> f64 {
+        debug_assert!(p <= 1);
         let x = (omega - self.eps) / self.radius;
         // p == 0 is the lower edge, p == 1 the upper one
         let sign = if p == 0 { 1.0 } else { -1.0 };
@@ -123,10 +125,149 @@ impl ContinuousDOS for SemicircleDOS {
 ///     A(\omega) = \frac{2}{\pi r^2} \sqrt{r^2 - \omega^2}\theta(r^2 - \omega^2).
 /// $$
 pub fn semicircle(eps: f64, r: f64) -> DensityOfStates {
-    assert!(r > 0.0, "radius must be positive");
     DensityOfStates {
         discrete: DiscreteDOS::new(),
         continuous: vec![(Rc::new(SemicircleDOS::new(eps, r)), 1.0)],
+    }
+}
+
+//
+// Chain DOS
+//
+
+/// Density of states of a linear chain
+struct ChainDOS {
+    eps: f64,
+    t: f64,
+    /// Band edges. For this model they double as the positions of the two
+    /// square-root singularities, which sit exactly at the edges of the support.
+    edges: [f64; 2],
+    prefactor: f64,
+}
+impl ChainDOS {
+    fn new(eps: f64, t: f64) -> ChainDOS {
+        assert!(t > 0.0, "hopping constant must be positive");
+        ChainDOS {
+            eps,
+            t,
+            edges: [eps - 2.0 * t, eps + 2.0 * t],
+            prefactor: 1.0 / (2.0 * std::f64::consts::PI * t),
+        }
+    }
+}
+impl ContinuousDOS for ChainDOS {
+    fn support(&self) -> (f64, f64) {
+        self.edges.into()
+    }
+    fn regular(&self, omega: f64) -> f64 {
+        if omega == self.edges[0] || omega == self.edges[1] {
+            -0.75 * self.prefactor
+        } else {
+            let x = (omega - self.eps) / (2.0 * self.t);
+
+            // 'sm' regularizes the derivative near ω = -2t to ease integration
+            let rm = (2.0 * (1.0 + x)).sqrt();
+            let sm = self.prefactor * (1.0 / rm + rm / 8.0);
+
+            // 'sp' regularizes the derivative near ω = 2t to ease integration
+            let rp = (2.0 * (1.0 - x)).sqrt();
+            let sp = self.prefactor * (1.0 / rp + rp / 8.0);
+
+            self.prefactor / (1.0 - x * x).sqrt() - sp - sm
+        }
+    }
+    fn singularities(&self) -> &[f64] {
+        &self.edges
+    }
+    fn asymptotics(&self, p: usize, omega: f64) -> f64 {
+        debug_assert!(p <= 1);
+        let x = (omega - self.eps) / (2.0 * self.t);
+        // p == 0 is the lower edge, p == 1 the upper one
+        let sign = if p == 0 { 1.0 } else { -1.0 };
+        let s = (2.0 * (1.0 + sign * x)).sqrt();
+        // The second term regularizes the derivative
+        self.prefactor * (1.0 / s + s / 8.0)
+    }
+    fn asympt_int(&self, _p: usize) -> f64 {
+        7.0 / (3.0 * std::f64::consts::PI)
+    }
+}
+
+/// Returns the normalized density of states of a linear chain with the hopping constant `t`
+/// and the local energy level `eps`,
+/// $$
+///     A(\omega) = \frac{1}{\pi} \frac{1}{\sqrt{(2t)^2 - (\omega-\eps)^2}}
+///         \theta((2t)^2 - (\omega-\eps)^2).
+/// $$
+pub fn chain(eps: f64, t: f64) -> DensityOfStates {
+    DensityOfStates {
+        discrete: DiscreteDOS::new(),
+        continuous: vec![(Rc::new(ChainDOS::new(eps, t)), 1.0)],
+    }
+}
+
+//
+// Square lattice DOS
+//
+
+/// Density of states of a square lattice
+struct SquareDOS {
+    eps: f64,
+    t: f64,
+    /// Band edges
+    edges: [f64; 2],
+    /// Position of the logarithmic van Hove singularity, which sits at the band center.
+    singularity: [f64; 1],
+    prefactor: f64,
+}
+impl SquareDOS {
+    fn new(eps: f64, t: f64) -> SquareDOS {
+        assert!(t > 0.0, "hopping constant must be positive");
+        SquareDOS {
+            eps,
+            t,
+            edges: [eps - 4.0 * t, eps + 4.0 * t],
+            singularity: [eps],
+            prefactor: 1.0 / (2.0 * std::f64::consts::PI.powi(2) * t),
+        }
+    }
+}
+impl ContinuousDOS for SquareDOS {
+    fn support(&self) -> (f64, f64) {
+        self.edges.into()
+    }
+    fn regular(&self, omega: f64) -> f64 {
+        let ax = ((omega - self.eps) / (4.0 * self.t)).abs();
+        if ax == 0.0 {
+            0.0
+        } else {
+            self.prefactor * ((1.0 - ax * ax).elliptic_k() + (0.25 * ax).ln())
+        }
+    }
+    fn singularities(&self) -> &[f64] {
+        &self.singularity
+    }
+    fn asymptotics(&self, p: usize, omega: f64) -> f64 {
+        debug_assert!(p == 0);
+        let x = (omega - self.eps) / (16.0 * self.t);
+        -self.prefactor * x.abs().ln()
+    }
+    fn asympt_int(&self, _p: usize) -> f64 {
+        4.0 / std::f64::consts::PI.powi(2) * (1.0 + 2.0 * std::f64::consts::LN_2)
+    }
+}
+
+/// Returns the normalized density of states of a square lattice with the hopping constant
+/// `t` and the local energy level `eps`,
+/// $$
+///     A(\omega) = \frac{1}{2\pi^2 t} K\left(1 - \frac{(\omega-\eps)^2}{(4t)^2}\right)
+///         \theta((4t)^2 - (\omega-\eps)^2),
+/// $$
+/// where $K(m)$ is the complete elliptic integral of the first kind.
+pub fn square(eps: f64, t: f64) -> DensityOfStates {
+    DensityOfStates {
+        discrete: DiscreteDOS::new(),
+        continuous: vec![(Rc::new(SquareDOS::new(eps, t)), 1.0)],
     }
 }
 
@@ -194,6 +335,52 @@ mod tests {
                 + 15.0 * eps.powi(4) * t.powi(2)
                 + 30.0 * eps.powi(2) * t.powi(4)
                 + 5.0 * t.powi(6),
+        ];
+        for order in 0..=6 {
+            let moment = compute_moment(&dos, order as i32);
+            assert_relative_eq!(moment, moments_ref[order], max_relative = 1e-10);
+        }
+    }
+
+    #[test]
+    fn chain() {
+        let eps = 0.5f64;
+        let t = 2.0f64;
+        let dos = models::chain(eps, t);
+        let moments_ref = vec![
+            1.0,
+            eps,
+            eps.powi(2) + 2.0 * t.powi(2),
+            eps.powi(3) + 6.0 * eps * t.powi(2),
+            eps.powi(4) + 12.0 * eps.powi(2) * t.powi(2) + 6.0 * t.powi(4),
+            eps.powi(5) + 20.0 * eps.powi(3) * t.powi(2) + 30.0 * eps * t.powi(4),
+            eps.powi(6)
+                + 30.0 * eps.powi(4) * t.powi(2)
+                + 90.0 * eps.powi(2) * t.powi(4)
+                + 20.0 * t.powi(6),
+        ];
+        for order in 0..=6 {
+            let moment = compute_moment(&dos, order as i32);
+            assert_relative_eq!(moment, moments_ref[order], max_relative = 1e-10);
+        }
+    }
+
+    #[test]
+    fn square() {
+        let eps = 0.5f64;
+        let t = 2.0f64;
+        let dos = models::square(eps, t);
+        let moments_ref = vec![
+            1.0,
+            eps,
+            eps.powi(2) + 4.0 * t.powi(2),
+            eps.powi(3) + 12.0 * eps * t.powi(2),
+            eps.powi(4) + 24.0 * eps.powi(2) * t.powi(2) + 36.0 * t.powi(4),
+            eps.powi(5) + 40.0 * eps.powi(3) * t.powi(2) + 180.0 * eps * t.powi(4),
+            eps.powi(6)
+                + 60.0 * eps.powi(4) * t.powi(2)
+                + 540.0 * eps.powi(2) * t.powi(4)
+                + 400.0 * t.powi(6),
         ];
         for order in 0..=6 {
             let moment = compute_moment(&dos, order as i32);
