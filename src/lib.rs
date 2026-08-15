@@ -21,7 +21,7 @@ pub struct Resonance {
 }
 
 /// Discrete density of states, A(ω) = ∑_p w_p δ(ω - ε_p).
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 pub struct DiscreteDOS {
     /// List of resonances, (ε_p, w_p)
     resonances: Vec<Resonance>,
@@ -31,15 +31,17 @@ pub struct DiscreteDOS {
     tol: f64,
 }
 
-impl DiscreteDOS {
-    pub fn default() -> Self {
+impl Default for DiscreteDOS {
+    fn default() -> Self {
         DiscreteDOS {
             resonances: vec![],
             clean: 0,
             tol: f64::EPSILON,
         }
     }
+}
 
+impl DiscreteDOS {
     /// Make an empty discrete DOS (zero resonances)
     pub fn new() -> Self {
         Self::default()

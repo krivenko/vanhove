@@ -46,7 +46,7 @@ impl GaussianDOS {
 }
 impl ContinuousDOS for GaussianDOS {
     fn support(&self) -> (f64, f64) {
-        (-std::f64::INFINITY, std::f64::INFINITY)
+        (-f64::INFINITY, f64::INFINITY)
     }
     fn regular(&self, omega: f64) -> f64 {
         self.prefactor * (-(omega - self.eps).powi(2) / self.denom).exp()
