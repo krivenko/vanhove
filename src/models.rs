@@ -1,4 +1,4 @@
-use crate::{ContinuousDOS, DensityOfStates, DiscreteDOS, Resonance, Singularity};
+use crate::{ContinuousDOS, DensityOfStates, DiscreteDOS, Resonance};
 /// Model densities of states commonly used in physics
 use std::rc::Rc;
 
@@ -70,60 +70,23 @@ pub fn gaussian(eps: f64, sigma: f64) -> DensityOfStates {
 // Semicircle DOS
 //
 
-struct SemicircleSingularity {
-    eps: f64,
-    radius: f64,
-    position: f64,
-    prefactor: f64,
-    sign: f64,
-}
-impl crate::Singularity for SemicircleSingularity {
-    fn position(&self) -> f64 {
-        self.position
-    }
-    fn asymptotics(&self, omega: f64) -> f64 {
-        let x = (omega - self.eps) / self.radius;
-        self.prefactor * (2.0 * (1.0 + self.sign * x)).sqrt()
-    }
-}
-
 /// Semicircle (Wigner) density of states
 struct SemicircleDOS {
     eps: f64,
     radius: f64,
+    /// Band edges. For this model they double as the positions of the two
+    /// square-root singularities, which sit exactly at the edges of the support.
     edges: [f64; 2],
     prefactor: f64,
-    singularities: [Rc<dyn Singularity>; 2],
-    asympt_int: [f64; 2],
 }
 impl SemicircleDOS {
     fn new(eps: f64, radius: f64) -> SemicircleDOS {
         assert!(radius > 0.0, "radius must be positive");
-        use std::f64::consts::PI;
-
-        let prefactor = 2.0 / (PI * radius);
-        let sing1 = SemicircleSingularity {
-            eps,
-            radius,
-            position: eps - radius,
-            prefactor,
-            sign: 1.0,
-        };
-        let sing2 = SemicircleSingularity {
-            eps,
-            radius,
-            position: eps + radius,
-            prefactor,
-            sign: -1.0,
-        };
-
         SemicircleDOS {
             eps,
             radius,
             edges: [eps - radius, eps + radius],
-            prefactor,
-            singularities: [Rc::new(sing1), Rc::new(sing2)],
-            asympt_int: std::array::repeat(16.0 / (3.0 * PI)),
+            prefactor: 2.0 / (std::f64::consts::PI * radius),
         }
     }
 }
@@ -140,11 +103,17 @@ impl ContinuousDOS for SemicircleDOS {
                 * ((1.0 - x * x).sqrt() - (2.0 * (1.0 - x)).sqrt() - (2.0 * (1.0 + x)).sqrt())
         }
     }
-    fn singularities(&self) -> &[Rc<dyn Singularity>] {
-        &self.singularities
+    fn singularities(&self) -> &[f64] {
+        &self.edges
     }
-    fn asympt_int(&self) -> &[f64] {
-        &self.asympt_int
+    fn asymptotics(&self, p: usize, omega: f64) -> f64 {
+        let x = (omega - self.eps) / self.radius;
+        // p == 0 is the lower edge, p == 1 the upper one
+        let sign = if p == 0 { 1.0 } else { -1.0 };
+        self.prefactor * (2.0 * (1.0 + sign * x)).sqrt()
+    }
+    fn asympt_int(&self, _p: usize) -> f64 {
+        16.0 / (3.0 * std::f64::consts::PI)
     }
 }
 

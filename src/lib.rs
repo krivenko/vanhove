@@ -120,30 +120,29 @@ impl DiscreteDOS {
 // ContinuousDOS
 //
 
-/// Isolated integrable singularity in the DOS
-trait Singularity {
-    /// Position of the singular point
-    fn position(&self) -> f64;
-    /// Asymptotic form of the DOS near the singular point
-    fn asymptotics(&self, omega: f64) -> f64;
-}
-
 /// Continuous density of states possibly containing integrable singularities.
 /// The DOS has the form A(ω) = R(ω) + ∑_p S_p(ω) for ω ∈ [ω_{min}, ω_{max}]
 /// and zero otherwise. R(ω) is a smooth function and each S_p(ω) has one isolated
 /// integrable singularity at Ω_p. The total spectral weight is expected to be 1.
+///
+/// The singular terms are keyed by their index p, which runs over the valid
+/// indices of the slice returned by `singularities()`.
 trait ContinuousDOS {
     /// Support of the DOS function specified as a segment [ω_{min}, ω_{max}]
     fn support(&self) -> (f64, f64);
     /// Regular part of the DOS, R(ω)
     fn regular(&self, omega: f64) -> f64;
-    /// Singularities
-    fn singularities(&self) -> &[Rc<dyn Singularity>] {
+    /// Positions of the singular points, Ω_p
+    fn singularities(&self) -> &[f64] {
         &[]
     }
-    /// Analytically derived values of ∫S_p(ω)dω over [ω_{min}, ω_{max}].
-    fn asympt_int(&self) -> &[f64] {
-        &[]
+    /// Asymptotic form of the DOS near the p-th singular point, S_p(ω)
+    fn asymptotics(&self, _p: usize, _omega: f64) -> f64 {
+        unreachable!("this DOS has no singularities")
+    }
+    /// Analytically derived value of ∫S_p(ω)dω over [ω_{min}, ω_{max}]
+    fn asympt_int(&self, _p: usize) -> f64 {
+        unreachable!("this DOS has no singularities")
     }
 }
 
@@ -244,19 +243,18 @@ impl DensityOfStates {
             .value;
 
             // Add integrals of the asymptotics
-            for (sing, int_p) in cdos.singularities().iter().zip(cdos.asympt_int()) {
+            for (p, &omega_p) in cdos.singularities().iter().enumerate() {
                 // ∫S_p(ω)[f(ω) - f(Ω_p)]dω
-                let omega_p = sing.position();
                 let f_p = f(omega_p);
                 res_contrib += util::bilby_integrate(
-                    |omega| sing.asymptotics(omega) * (f(omega) - f_p),
+                    |omega| cdos.asymptotics(p, omega) * (f(omega) - f_p),
                     omega_min,
                     omega_max,
                     tol,
                 )?
                 .value;
                 // ∫S_p(ω)dω f(Ω_p)
-                res_contrib += int_p * f_p;
+                res_contrib += cdos.asympt_int(p) * f_p;
             }
 
             result += w * res_contrib;
