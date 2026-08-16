@@ -3,6 +3,7 @@ use crate::util::fermi;
 use crate::{ContinuousDOS, DensityOfStates, DiscreteDOS, Resonance};
 
 use special::Elliptic;
+use std::f64::consts::PI;
 use std::rc::Rc;
 
 //
@@ -91,7 +92,7 @@ impl GaussianDOS {
         GaussianDOS {
             eps,
             denom: 2.0 * sigma.powi(2),
-            prefactor: 1.0 / (sigma * (2.0 * std::f64::consts::PI).sqrt()),
+            prefactor: 1.0 / (sigma * (2.0 * PI).sqrt()),
         }
     }
 }
@@ -136,7 +137,7 @@ impl SemicircleDOS {
             eps,
             radius,
             edges: [eps - radius, eps + radius],
-            prefactor: 2.0 / (std::f64::consts::PI * radius),
+            prefactor: 2.0 / (PI * radius),
         }
     }
 }
@@ -164,7 +165,7 @@ impl ContinuousDOS for SemicircleDOS {
         self.prefactor * (2.0 * (1.0 + sign * x)).sqrt()
     }
     fn asympt_int(&self, _p: usize) -> f64 {
-        16.0 / (3.0 * std::f64::consts::PI)
+        16.0 / (3.0 * PI)
     }
 }
 
@@ -200,7 +201,7 @@ impl ChainDOS {
             eps,
             t,
             edges: [eps - 2.0 * t, eps + 2.0 * t],
-            prefactor: 1.0 / (2.0 * std::f64::consts::PI * t),
+            prefactor: 1.0 / (2.0 * PI * t),
         }
     }
 }
@@ -238,7 +239,7 @@ impl ContinuousDOS for ChainDOS {
         self.prefactor * (1.0 / s + s / 8.0)
     }
     fn asympt_int(&self, _p: usize) -> f64 {
-        7.0 / (3.0 * std::f64::consts::PI)
+        7.0 / (3.0 * PI)
     }
 }
 
@@ -277,7 +278,7 @@ impl SquareDOS {
             t,
             edges: [eps - 4.0 * t, eps + 4.0 * t],
             singularity: [eps],
-            prefactor: 1.0 / (2.0 * std::f64::consts::PI.powi(2) * t),
+            prefactor: 1.0 / (2.0 * PI.powi(2) * t),
         }
     }
 }
@@ -302,7 +303,7 @@ impl ContinuousDOS for SquareDOS {
         -self.prefactor * x.abs().ln()
     }
     fn asympt_int(&self, _p: usize) -> f64 {
-        4.0 / std::f64::consts::PI.powi(2) * (1.0 + 2.0 * std::f64::consts::LN_2)
+        4.0 / PI.powi(2) * (1.0 + 2.0 * std::f64::consts::LN_2)
     }
 }
 
