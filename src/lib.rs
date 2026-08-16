@@ -220,7 +220,6 @@ impl Mul<f64> for DensityOfStates {
         }
     }
 }
-
 /// Multiply DOS by a real number from the left
 impl Mul<DensityOfStates> for f64 {
     type Output = DensityOfStates;
@@ -228,7 +227,6 @@ impl Mul<DensityOfStates> for f64 {
         dos * self
     }
 }
-
 /// Addition of two densities of states
 impl Add for DensityOfStates {
     type Output = Self;
@@ -241,12 +239,16 @@ impl Add for DensityOfStates {
         sum
     }
 }
-
-//
-// DOS integration
-//
-
 impl DensityOfStates {
+    /// Total spectral weight of the density of states
+    pub fn norm(&self) -> f64 {
+        self.discrete.norm() + self.continuous.iter().map(|(_, w)| w).sum::<f64>()
+    }
+
+    //
+    // DOS integration
+    //
+
     /// Given a density of states A(ω) and a real-valued function f(ω),
     /// compute the integral ∫A(ω)f(ω)dω.
     pub fn integrate<F: Fn(f64) -> f64>(
@@ -317,6 +319,7 @@ impl DensityOfStates {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::models::{discrete, gaussian};
     use approx::assert_relative_eq;
 
     #[test]
@@ -387,5 +390,11 @@ mod tests {
         assert_eq!(bulk.resonances().len(), 10);
         assert!(bulk.resonances().iter().all(|r| r.eps >= 0.0));
         assert_relative_eq!(bulk.norm(), 0.5, epsilon = 1e-15);
+    }
+
+    #[test]
+    fn norm() {
+        let dos = 2.0 * discrete(&[-0.7, 1.2], &[0.25, 0.6]) + 5.0 * gaussian(1.4, 0.5);
+        assert_relative_eq!(dos.norm(), 6.7, epsilon = 1e-12);
     }
 }
