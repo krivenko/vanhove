@@ -1,6 +1,8 @@
+//! Model densities of states commonly used in physics
+
+use crate::discrete::{DiscreteDOS, Resonance};
 use crate::util::fermi;
-/// Model densities of states commonly used in physics
-use crate::{ContinuousDOS, DensityOfStates, DiscreteDOS, Resonance};
+use crate::{ContinuousDOS, DensityOfStates};
 
 use special::Elliptic;
 use std::f64::consts::PI;
