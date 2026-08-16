@@ -17,12 +17,10 @@ use std::rc::Rc;
 /// $$
 pub fn discrete(levels: &[f64], weights: &[f64]) -> DensityOfStates {
     let mut discrete = DiscreteDOS::new();
-    for (eps, weight) in levels.iter().zip(weights) {
-        discrete.add(&Resonance {
-            eps: *eps,
-            weight: *weight,
-        });
-    }
+    discrete.extend(levels.iter().zip(weights).map(|(eps, weight)| Resonance {
+        eps: *eps,
+        weight: *weight,
+    }));
     DensityOfStates {
         discrete,
         continuous: vec![],

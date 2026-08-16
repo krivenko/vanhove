@@ -49,14 +49,13 @@ impl DiscreteDOS {
 
     /// Make a discrete DOS with one resonance
     pub fn one_resonance(eps: f64, weight: f64) -> DiscreteDOS {
-        DiscreteDOS {
-            resonances: vec![Resonance { eps, weight }],
-            clean: 1,
-            tol: f64::EPSILON,
-        }
+        let mut dos = DiscreteDOS::new();
+        dos.add(&Resonance { eps, weight });
+        dos
     }
 
-    /// Access the resonance list
+    /// Rebuild and access the resonance list in its canonical form (sorted w.r.t. ε_p,
+    /// deduplicated, free of negligible weights).
     pub fn resonances(&mut self) -> &[Resonance] {
         if self.clean != self.resonances.len() {
             self.prune();
@@ -66,12 +65,29 @@ impl DiscreteDOS {
 
     /// Total spectral weight of the DOS
     pub fn norm(&self) -> f64 {
-        self.resonances[..self.clean].iter().map(|r| r.weight).sum()
+        util::kahan_babushka_neumaier_sum(self.resonances.iter().map(|r| r.weight))
     }
 
     /// Add a resonance to the DOS
     pub fn add(&mut self, res: &Resonance) {
         debug_assert!(!res.eps.is_nan(), "res.eps must not be NaN");
+        self.push(res);
+        self.prune_if_needed();
+    }
+
+    /// Add a batch of resonances to the DOS, canonicalizing the list at most once
+    pub fn extend<I: IntoIterator<Item = Resonance>>(&mut self, resonances: I) {
+        let iter = resonances.into_iter();
+        self.resonances.reserve(iter.size_hint().0);
+        for res in iter {
+            debug_assert!(!res.eps.is_nan(), "res.eps must not be NaN");
+            self.push(&res);
+        }
+        self.prune_if_needed();
+    }
+
+    /// Append a resonance to the (possibly unsorted) resonance list
+    fn push(&mut self, res: &Resonance) {
         if res.weight != 0.0 {
             // canonicalize -0.0 so it groups with 0.0 under total_cmp
             self.resonances.push(Resonance {
@@ -79,6 +95,14 @@ impl DiscreteDOS {
                 weight: res.weight,
             });
         }
+    }
+
+    /// Canonicalize the resonance list once its unsorted tail has grown big enough.
+    ///
+    /// The threshold makes `self.clean` grow geometrically between calls, so a
+    /// sequence of N additions triggers O(log N) prunes and costs O(N log N) in
+    /// total, i.e. O(log N) amortized per addition.
+    fn prune_if_needed(&mut self) {
         if self.resonances.len() > 2 * self.clean + 16 {
             self.prune();
         }
@@ -86,7 +110,11 @@ impl DiscreteDOS {
 
     /// Sort, deduplicate and remove small-weight resonances
     fn prune(&mut self) {
-        // Sort the resonances w.r.t. ε
+        // The singleton fast path below relies on the tolerance being relative
+        debug_assert!(self.tol < 1.0, "tol must be a relative tolerance");
+
+        // Sort the resonances w.r.t. ε. `resonances[..clean]` is already sorted,
+        // which the stable sort detects as a run and merges rather than re-sorts.
         let res = &mut self.resonances;
         res.sort_by(|r1, r2| r1.eps.total_cmp(&r2.eps));
 
@@ -97,6 +125,14 @@ impl DiscreteDOS {
             let eps = res[i].eps;
             while i < res.len() && res[i].eps == eps {
                 i += 1;
+            }
+
+            // A lone resonance needs no summation and can only be negligible
+            // w.r.t. itself, which `total.abs() > self.tol * mag` never is
+            if i == start + 1 {
+                res[w] = res[start];
+                w += 1;
+                continue;
             }
 
             // Sum all weights within the slice, with Neumaier compensation
@@ -196,15 +232,12 @@ impl Mul<DensityOfStates> for f64 {
 /// Addition of two densities of states
 impl Add for DensityOfStates {
     type Output = Self;
-    fn add(self, mut rhs: DensityOfStates) -> DensityOfStates {
+    fn add(self, rhs: DensityOfStates) -> DensityOfStates {
         // Discrete part
-        let mut sum = self.clone();
-        for r in rhs.discrete.resonances() {
-            sum.discrete.add(r);
-        }
-        for r in rhs.continuous {
-            sum.continuous.push(r);
-        }
+        let mut sum = self;
+        sum.discrete.extend(rhs.discrete.resonances);
+        // Continuous part
+        sum.continuous.extend(rhs.continuous);
         sum
     }
 }
@@ -284,6 +317,7 @@ impl DensityOfStates {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use approx::assert_relative_eq;
 
     #[test]
     fn discrete_dos() {
@@ -315,5 +349,43 @@ mod tests {
         });
         assert_eq!(dos.resonances().len(), 1);
         assert_eq!(dos.norm(), 0.25);
+    }
+
+    #[test]
+    fn discrete_dos_extend() {
+        // A batch big enough to make `add()` defer the pruning work: the
+        // canonical form must be the same either way
+        let batch: Vec<Resonance> = (0..100)
+            .map(|n| Resonance {
+                eps: ((n * 37) % 20) as f64 - 10.0,
+                weight: 0.01,
+            })
+            .collect();
+
+        let mut one_by_one = DiscreteDOS::new();
+        for res in &batch {
+            one_by_one.add(res);
+        }
+        let mut bulk = DiscreteDOS::new();
+        bulk.extend(batch.iter().copied());
+
+        // 20 distinct levels, each hit 5 times
+        assert_eq!(bulk.resonances().len(), 20);
+        assert_relative_eq!(bulk.norm(), 1.0, epsilon = 1e-15);
+        for (r1, r2) in bulk.resonances().iter().zip(one_by_one.resonances()) {
+            assert_eq!(r1.eps, r2.eps);
+            assert_eq!(r1.weight, r2.weight);
+        }
+        // Sorted w.r.t. ε and free of duplicates
+        assert!(bulk.resonances().windows(2).all(|w| w[0].eps < w[1].eps));
+
+        // Exactly cancelling contributions are dropped, keeping the survivors
+        bulk.extend(batch.iter().map(|r| Resonance {
+            eps: r.eps,
+            weight: if r.eps < 0.0 { -r.weight } else { 0.0 },
+        }));
+        assert_eq!(bulk.resonances().len(), 10);
+        assert!(bulk.resonances().iter().all(|r| r.eps >= 0.0));
+        assert_relative_eq!(bulk.norm(), 0.5, epsilon = 1e-15);
     }
 }
