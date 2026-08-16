@@ -346,7 +346,7 @@ mod tests {
         let weights = vec![0.5, 0.5, 0.25];
         let dos = models::discrete(&levels, &weights);
         for order in 0..=6 {
-            let moment = compute_moment(&dos, order as i32);
+            let moment = compute_moment(&dos, order);
             let moment_ref = levels
                 .iter()
                 .zip(&weights)
@@ -374,9 +374,9 @@ mod tests {
         let moments_ref = central_to_moments(eps, mu2, mu4, mu6);
 
         let dos = models::flat(eps, d, nu);
-        for order in 0..=6 {
+        for (order, moment_ref) in moments_ref.iter().enumerate() {
             let moment = compute_moment(&dos, order as i32);
-            assert_relative_eq!(moment, moments_ref[order], max_relative = 1e-10);
+            assert_relative_eq!(moment, moment_ref, max_relative = 1e-10);
         }
     }
 
@@ -392,9 +392,9 @@ mod tests {
         );
 
         let dos = models::gaussian(eps, sigma);
-        for order in 0..=6 {
+        for (order, moment_ref) in moments_ref.iter().enumerate() {
             let moment = compute_moment(&dos, order as i32);
-            assert_relative_eq!(moment, moments_ref[order], max_relative = 1e-10);
+            assert_relative_eq!(moment, moment_ref, max_relative = 1e-10);
         }
     }
 
@@ -411,9 +411,9 @@ mod tests {
         );
 
         let dos = models::semicircle(eps, r);
-        for order in 0..=6 {
+        for (order, moment_ref) in moments_ref.iter().enumerate() {
             let moment = compute_moment(&dos, order as i32);
-            assert_relative_eq!(moment, moments_ref[order], max_relative = 1e-10);
+            assert_relative_eq!(moment, moment_ref, max_relative = 1e-10);
         }
     }
 
@@ -425,9 +425,9 @@ mod tests {
             central_to_moments(eps, 2.0 * t.powi(2), 6.0 * t.powi(4), 20.0 * t.powi(6));
 
         let dos = models::chain(eps, t);
-        for order in 0..=6 {
+        for (order, moment_ref) in moments_ref.iter().enumerate() {
             let moment = compute_moment(&dos, order as i32);
-            assert_relative_eq!(moment, moments_ref[order], max_relative = 1e-10);
+            assert_relative_eq!(moment, moment_ref, max_relative = 1e-10);
         }
     }
 
@@ -439,9 +439,9 @@ mod tests {
             central_to_moments(eps, 4.0 * t.powi(2), 36.0 * t.powi(4), 400.0 * t.powi(6));
 
         let dos = models::square(eps, t);
-        for order in 0..=6 {
+        for (order, moment_ref) in moments_ref.iter().enumerate() {
             let moment = compute_moment(&dos, order as i32);
-            assert_relative_eq!(moment, moments_ref[order], max_relative = 1e-10);
+            assert_relative_eq!(moment, moment_ref, max_relative = 1e-10);
         }
     }
 }

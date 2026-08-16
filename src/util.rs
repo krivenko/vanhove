@@ -62,18 +62,24 @@ mod tests {
 
     #[test]
     fn kahan_babushka_neumaier_sum() {
-        let v = vec![10000.0f64, 3.14159f64, 2.71828f64];
+        use std::f64::consts::{E, PI};
+        let v = vec![10000.0f64, PI, E];
         assert_abs_diff_eq!(
             util::kahan_babushka_neumaier_sum(v.into_iter()),
-            10005.85987,
+            10000.0 + PI + E,
             epsilon = 1e-12
         );
+
+        // Neumaier's example: naive summation and the plain Kahan algorithm both
+        // return 0, while the compensated sum is exact.
+        let v = vec![1.0f64, 1e100, 1.0, -1e100];
+        assert_eq!(util::kahan_babushka_neumaier_sum(v.into_iter()), 2.0);
     }
 
     #[test]
     fn bilby_integrate() {
         let pi = std::f64::consts::PI;
-        let inf = std::f64::INFINITY;
+        let inf = f64::INFINITY;
         assert_abs_diff_eq!(
             util::bilby_integrate(move |x| x.cos() * x.cos(), -pi, pi, 1e-12)
                 .unwrap()
