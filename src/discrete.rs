@@ -2,7 +2,7 @@
 
 use crate::util;
 
-/// Single discrete resonance $w \delta(\omega - \varepsilon)$
+/// Single discrete resonance $w \delta(\omega - \varepsilon)$.
 #[derive(Debug, Clone, Copy)]
 pub struct Resonance {
     /// Position of the resonance, $\varepsilon$
@@ -11,7 +11,7 @@ pub struct Resonance {
     pub weight: f64,
 }
 
-/// Discrete density of states,
+/// Discrete density of states with a finite number of resonances,
 /// $$
 ///     A(\omega) = \sum_p w_p \delta(\omega - \varepsilon_p).
 /// $$
@@ -48,8 +48,8 @@ impl DiscreteDOS {
         dos
     }
 
-    /// Rebuild and access the resonance list in its canonical form (sorted w.r.t. ε_p,
-    /// deduplicated, free of negligible weights).
+    /// Rebuild and access the resonance list in its canonical form (sorted w.r.t.
+    /// $\varepsilon_p$, deduplicated, free of negligible weights).
     pub fn resonances(&mut self) -> &[Resonance] {
         if self.clean != self.resonances.len() {
             self.prune();

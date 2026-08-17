@@ -15,32 +15,34 @@ use crate::discrete::DiscreteDOS;
 //
 
 /// Continuous density of states possibly containing integrable singularities.
-/// The DOS has the form A(ω) = R(ω) + ∑_p S_p(ω) for ω ∈ [ω_{min}, ω_{max}]
-/// and zero otherwise. R(ω) is a smooth function and each S_p(ω) has one isolated
-/// integrable singularity at Ω_p. The total spectral weight is expected to be 1.
+/// The DOS has the form $A(\omega) = R(\omega) + \sum_p S_p(\omega)$ for
+/// $\omega \in [\omega_{min}, \omega_{max}]$ and zero otherwise.
+/// $R(\omega)$ is a smooth function and each $S_p(\omega)$ has one isolated
+/// integrable singularity at $\Omega_p$. The total spectral weight is expected to be 1.
 ///
 /// The singular terms are keyed by their index p, which runs over the valid
 /// indices of the slice returned by `singularities()`.
 trait ContinuousDOS {
-    /// Support of the DOS function specified as a segment [ω_{min}, ω_{max}]
+    /// Support of the DOS function specified as a segment $[\omega_{min}, \omega_{max}]$
     fn support(&self) -> (f64, f64);
-    /// Regular part of the DOS, R(ω)
+    /// Regular part of the DOS, $R(\omega)$
     fn regular(&self, omega: f64) -> f64;
     /// Positions of the singular points, Ω_p
     fn singularities(&self) -> &[f64] {
         &[]
     }
-    /// Asymptotic form of the DOS near the p-th singular point, S_p(ω)
+    /// Asymptotic form of the DOS near the p-th singular point, $S_p(\omega)$
     fn asymptotics(&self, _p: usize, _omega: f64) -> f64 {
         unreachable!("this DOS has no singularities")
     }
-    /// Analytically derived value of ∫S_p(ω)dω over [ω_{min}, ω_{max}]
+    /// Analytically derived value of $\int S_p(\omega)d\omega$ over
+    /// $[\omega_{min}, \omega_{max}]$
     fn asympt_int(&self, _p: usize) -> f64 {
         unreachable!("this DOS has no singularities")
     }
 }
 
-// Density of states as a weighted sum of discrete resonances and continuous contributions
+/// Density of states as a weighted sum of discrete resonances and continuous contributions.
 #[derive(Clone)]
 pub struct DensityOfStates {
     // Contributions of discrete resonances
@@ -49,7 +51,7 @@ pub struct DensityOfStates {
     continuous: Vec<(Rc<dyn ContinuousDOS>, f64)>,
 }
 
-/// Multiply DOS by a real number from the right
+/// Multiply DOS by a real number from the right.
 impl Mul<f64> for DensityOfStates {
     type Output = Self;
 
@@ -74,14 +76,14 @@ impl Mul<f64> for DensityOfStates {
         }
     }
 }
-/// Multiply DOS by a real number from the left
+/// Multiply DOS by a real number from the left.
 impl Mul<DensityOfStates> for f64 {
     type Output = DensityOfStates;
     fn mul(self, dos: DensityOfStates) -> DensityOfStates {
         dos * self
     }
 }
-/// Addition of two densities of states
+/// Addition of two densities of states.
 impl Add for DensityOfStates {
     type Output = Self;
     fn add(self, rhs: DensityOfStates) -> DensityOfStates {
@@ -94,7 +96,7 @@ impl Add for DensityOfStates {
     }
 }
 impl DensityOfStates {
-    /// Total spectral weight of the density of states
+    /// Total spectral weight of the density of states.
     pub fn norm(&self) -> f64 {
         self.discrete.norm() + self.continuous.iter().map(|(_, w)| w).sum::<f64>()
     }
@@ -103,8 +105,8 @@ impl DensityOfStates {
     // DOS integration
     //
 
-    /// Given a density of states A(ω) and a real-valued function f(ω),
-    /// compute the integral ∫A(ω)f(ω)dω.
+    /// Given a density of states $A(\omega)$ and a real-valued function $f(\omega)$,
+    /// compute the integral $\int A(\omega)f(\omega)d\omega$.
     pub fn integrate<F: Fn(f64) -> f64>(
         &self,
         f: F,
@@ -159,8 +161,8 @@ impl DensityOfStates {
         Ok(result)
     }
 
-    /// Given a density of states A(ω) and a complex-valued function f(ω),
-    /// compute the integral ∫A(ω)f(ω)dω
+    /// Given a density of states $A(\omega)$ and a complex-valued function $f(\omega)$,
+    /// compute the integral $\int A(\omega)f(\omega)d\omega$.
     pub fn integrate_complex<F: Fn(f64) -> Complex64>(
         &self,
         f: F,

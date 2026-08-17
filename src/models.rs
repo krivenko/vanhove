@@ -66,8 +66,8 @@ impl ContinuousDOS for FlatDOS {
 /// Returns the normalized flat density of states centered at `eps` with half-bandwidth `d`,
 /// and smooth, Fermi-like band edges of inverse width `nu`,
 /// $$
-///     A(\omega) = \frac{1}{(d(1 + \coth(\nu d)))}
-///         \frac{1}{(\exp(\nu(\omega-\epsilon-d))+1)(\exp(-\nu(\omega-\epsilon+d))+1)}.
+///     A(\omega) = \frac{1}{d(1 + \coth(\nu d))}
+///         \frac{1}{(e^{\nu(\omega-\epsilon-d)}+1)(e^{-\nu(\omega-\epsilon+d)}+1)}.
 /// $$
 pub fn flat(eps: f64, d: f64, nu: f64) -> DensityOfStates {
     DensityOfStates {
@@ -310,7 +310,7 @@ impl ContinuousDOS for SquareDOS {
 /// Returns the normalized density of states of a square lattice with the hopping constant
 /// `t` and the local energy level `eps`,
 /// $$
-///     A(\omega) = \frac{1}{2\pi^2 t} K\left(1 - \frac{(\omega-\epsilon)^2}{(4t)^2}\right)
+///     A(\omega) = \frac{1}{2\pi^2 t} K\left(1 - \left(\frac{\omega-\epsilon}{4t}\right)^2\right)
 ///         \theta((4t)^2 - (\omega-\epsilon)^2),
 /// $$
 /// where $K(m)$ is the complete elliptic integral of the first kind.
