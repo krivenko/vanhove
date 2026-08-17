@@ -260,6 +260,11 @@ pub fn chain(eps: f64, t: f64) -> DensityOfStates {
 // Square lattice DOS
 //
 
+/// Value of $|\omega-\epsilon|/(4t)$ below which the regular part of the square lattice DOS
+/// is evaluated using a series expansion. At the threshold both expressions agree to
+/// within a relative error of $10^{-5}$.
+const SQUARE_DOS_SERIES_THRESHOLD: f64 = 1e-3;
+
 /// Density of states of a square lattice
 struct SquareDOS {
     eps: f64,
@@ -290,6 +295,13 @@ impl ContinuousDOS for SquareDOS {
         let ax = ((omega - self.eps) / (4.0 * self.t)).abs();
         if ax == 0.0 {
             0.0
+        } else if ax < SQUARE_DOS_SERIES_THRESHOLD {
+            // Close to the singularity, K(1 - ax^2) ≈ ln(4/ax) nearly cancels the
+            // logarithm, and evaluating the difference directly is catastrophically
+            // inaccurate. Worse, 1 - ax^2 rounds to 1 for ax below ~1e-8, which makes
+            // elliptic_k() overflow. Use the expansion
+            // K(1 - a^2) = ln(4/a) + (a^2/4)[ln(4/a) - 1] + O(a^4 ln a) instead.
+            self.prefactor * 0.25 * ax.powi(2) * ((4.0 / ax).ln() - 1.0)
         } else {
             self.prefactor * ((1.0 - ax * ax).elliptic_k() + (0.25 * ax).ln())
         }
@@ -430,6 +442,27 @@ mod tests {
         for (order, moment_ref) in moments_ref.iter().enumerate() {
             let moment = compute_moment(&dos, order as i32);
             assert_relative_eq!(moment, moment_ref, max_relative = 1e-10);
+        }
+    }
+
+    #[test]
+    fn square_regular_near_singularity() {
+        use crate::ContinuousDOS;
+        use crate::models::SquareDOS;
+
+        let (eps, t) = (0.5f64, 2.0f64);
+        let dos = SquareDOS::new(eps, t);
+        let prefactor = 1.0 / (2.0 * std::f64::consts::PI.powi(2) * t);
+
+        assert_eq!(dos.regular(eps), 0.0);
+        for e in 2..=16 {
+            for sign in [-1.0f64, 1.0] {
+                let omega = eps + sign * 10f64.powi(-e);
+                // Leading order of the expansion of R(ω) around the singularity
+                let ax = 10f64.powi(-e) / (4.0 * t);
+                let ref_value = prefactor * 0.25 * ax.powi(2) * ((4.0 / ax).ln() - 1.0);
+                assert_relative_eq!(dos.regular(omega), ref_value, max_relative = 1e-4);
+            }
         }
     }
 
