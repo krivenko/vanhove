@@ -2,7 +2,18 @@
 name = "vanhove"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.93"
+authors = ["Igor Krivenko <iskrivenko@proton.me>"]
+description = "Model densities of states with integrable van Hove singularities and accurate integration of spectral functions"
+categories = ["science"]
+keywords = ["physics", "dos", "model", "numerical", "integration"]
+
 license = "MIT OR Apache-2.0"
+readme = "README.md"
+repository = "https://github.com/krivenko/vanhove"
+documentation = "https://krivenko.github.io/vanhove/"
+
+include = ["/src", "katex-header.html"]
 
 [dependencies]
 bilby = "0.3.0"
@@ -11,3 +22,6 @@ special = "0.14.1"
 
 [dev-dependencies]
 approx = "0.5.1"
+
+[package.metadata.docs.rs]
+rustdoc-args = [ "--html-in-header", "katex-header.html" ]
