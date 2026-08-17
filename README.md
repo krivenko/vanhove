@@ -2,7 +2,7 @@
 
 [![crates.io](https://img.shields.io/crates/v/vanhove.svg)](https://crates.io/crates/vanhove)
 [![docs](https://img.shields.io/badge/docs-vanhove-blue)](https://krivenko.github.io/vanhove/)
-[![license](https://img.shields.io/crates/l/vanhove.svg)](#license)
+[![license](https://img.shields.io/badge/license-MIT%20or%20Apache--2.0-blue.svg)](#license)
 
 Model densities of states with integrable van Hove singularities, and accurate
 integration of spectral functions.
