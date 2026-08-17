@@ -2,6 +2,7 @@ pub mod discrete;
 pub mod models;
 mod util;
 
+use std::f64::consts::PI;
 use std::ops::{Add, Mul};
 use std::rc::Rc;
 
@@ -166,20 +167,124 @@ impl DensityOfStates {
     pub fn integrate_complex<F: Fn(f64) -> Complex64>(
         &self,
         f: F,
+        tol: Option<f64>,
     ) -> Result<Complex64, QuadratureError> {
-        Ok(self.integrate(|omega| f(omega).re, None)?
-            + Complex64::I * self.integrate(|omega| f(omega).im, None)?)
+        Ok(self.integrate(|omega| f(omega).re, tol)?
+            + Complex64::I * self.integrate(|omega| f(omega).im, tol)?)
+    }
+
+    /// Evaluate value of the broadened density of states at a frequency `omega` by
+    /// computing its convolution with the Lorentzian line shape function of the
+    /// half-width at half-maximum `delta`,
+    /// $$
+    ///     \int \frac{1}{\pi} \frac{\delta}{\delta^2 + (\omega-\omega')^2}
+    ///         A(\omega') d\omega'.
+    /// $$
+    /// The discrete part of the DOS contributes a Lorentzian per resonance, so that
+    /// the broadened DOS is a smooth function of `omega` for any $\delta > 0$.
+    ///
+    /// The line shape function is sharply peaked for small `delta`, and its integral
+    /// is of the order $1/(\pi\delta)$. It may, therefore, be necessary to relax the
+    /// absolute quadrature tolerance `tol` from its default value of $10^{-10}$.
+    pub fn broadened(
+        &self,
+        omega: f64,
+        delta: f64,
+        tol: Option<f64>,
+    ) -> Result<f64, QuadratureError> {
+        assert!(delta > 0.0, "broadening must be positive");
+        let (weight, delta_sq) = (delta / PI, delta.powi(2));
+        let f = |omega_prime: f64| -> f64 { weight / (delta_sq + (omega_prime - omega).powi(2)) };
+        self.integrate(f, tol)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::models::{discrete, gaussian};
+    use crate::models::{chain, discrete, gaussian, square};
     use approx::assert_relative_eq;
+    use std::f64::consts::PI;
 
     #[test]
     fn norm() {
         let dos = 2.0 * discrete(&[-0.7, 1.2], &[0.25, 0.6]) + 5.0 * gaussian(1.4, 0.5);
         assert_relative_eq!(dos.norm(), 6.7, epsilon = 1e-12);
+    }
+
+    #[test]
+    fn broadened_discrete() {
+        // A discrete DOS is broadened into a sum of Lorentzians, which serves as
+        // an analytic reference value.
+        let levels = [-0.7f64, 1.2];
+        let weights = [0.25f64, 0.6];
+        let dos = 2.0 * discrete(&levels, &weights);
+
+        for delta in [1e-1, 1e-2, 1e-4] {
+            for omega in [-0.7, 0.0, 0.5, 1.2, 50.0] {
+                let ref_value: f64 = 2.0
+                    * levels
+                        .iter()
+                        .zip(&weights)
+                        .map(|(eps, w)| w * (delta / PI) / (delta.powi(2) + (omega - eps).powi(2)))
+                        .sum::<f64>();
+                assert_relative_eq!(
+                    dos.broadened(omega, delta, None).unwrap(),
+                    ref_value,
+                    max_relative = 1e-10
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn broadened_narrow_limit() {
+        // As delta -> 0 the broadened DOS approaches A(omega) itself. The error of
+        // the Lorentzian broadening is linear in delta.
+        let (eps, t, omega) = (0.5f64, 1.0f64, 0.8f64);
+        let dos = chain(eps, t);
+        let ref_value = 1.0 / (PI * ((2.0 * t).powi(2) - (omega - eps).powi(2)).sqrt());
+        for delta in [1e-4, 1e-6] {
+            assert_relative_eq!(
+                dos.broadened(omega, delta, None).unwrap(),
+                ref_value,
+                max_relative = 10.0 * delta
+            );
+        }
+    }
+
+    #[test]
+    fn broadened_log_singularity() {
+        // Broadening forces the quadrature to sample the DOS arbitrarily close to
+        // the logarithmic van Hove singularity of the square lattice. At the band
+        // center the broadened DOS diverges as -ln(delta)/(2π^2 t) for delta -> 0.
+        let t = 2.0f64;
+        let dos = square(0.0, t);
+        let mut prev = dos.broadened(0.0, 1e-2, None).unwrap();
+        for delta in [1e-3, 1e-4, 1e-5, 1e-6] {
+            let value = dos.broadened(0.0, delta, None).unwrap();
+            assert_relative_eq!(
+                value - prev,
+                10f64.ln() / (2.0 * PI.powi(2) * t),
+                max_relative = 1e-3
+            );
+            prev = value;
+        }
+    }
+
+    #[test]
+    fn broadened_mixed() {
+        // Reference value computed independently with mpmath (40 decimal digits).
+        let dos = 2.0 * discrete(&[-0.7, 1.2], &[0.25, 0.6]) + 5.0 * gaussian(1.4, 0.5);
+        assert_relative_eq!(
+            dos.broadened(0.5, 1e-2, None).unwrap(),
+            0.8138402146,
+            epsilon = 1e-9
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "broadening must be positive")]
+    fn broadened_zero_delta() {
+        let _ = gaussian(1.4, 0.5).broadened(0.5, 0.0, None);
     }
 }
