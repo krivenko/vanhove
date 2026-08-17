@@ -18,13 +18,12 @@ use std::rc::Rc;
 ///     A(\omega) = \sum_p w_p \delta(\omega - \varepsilon_p).
 /// $$
 pub fn discrete(levels: &[f64], weights: &[f64]) -> DensityOfStates {
-    let mut discrete = DiscreteDOS::new();
-    discrete.extend(levels.iter().zip(weights).map(|(eps, weight)| Resonance {
-        eps: *eps,
-        weight: *weight,
-    }));
     DensityOfStates {
-        discrete,
+        discrete: levels
+            .iter()
+            .zip(weights)
+            .map(|(&eps, &weight)| Resonance { eps, weight })
+            .collect(),
         continuous: vec![],
     }
 }

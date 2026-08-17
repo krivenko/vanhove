@@ -1,5 +1,7 @@
 //! Discrete density of states
 
+use std::ops::{Add, Mul};
+
 use crate::util;
 
 /// Single discrete resonance $w \delta(\omega - \varepsilon)$.
@@ -15,27 +17,155 @@ pub struct Resonance {
 /// $$
 ///     A(\omega) = \sum_p w_p \delta(\omega - \varepsilon_p).
 /// $$
-#[derive(Debug, Clone)]
+///
+/// The list of resonances is sealed upon construction and is always kept in its
+/// canonical form: sorted w.r.t. $\varepsilon_p$, free of duplicate positions and
+/// free of negligible weights.
+#[derive(Debug, Clone, Default)]
 pub struct DiscreteDOS {
-    /// List of resonances, (\varepsilon_p, w_p)
+    /// Resonances $(\varepsilon_p, w_p)$ in the canonical form
     resonances: Vec<Resonance>,
-    /// resonances[..clean] is sorted w.r.t. \varepsilon_p, deduplicated, zero-weight-free
-    clean: usize,
-    /// Relative tolerance level for negligible weights
-    tol: f64,
 }
 
-impl Default for DiscreteDOS {
-    fn default() -> Self {
-        DiscreteDOS {
-            resonances: vec![],
-            clean: 0,
-            tol: f64::EPSILON,
-        }
+/// Build a discrete DOS out of resonances given in an arbitrary order. Resonances
+/// sharing a position are merged, and groups whose total weight cancels out are dropped.
+impl FromIterator<Resonance> for DiscreteDOS {
+    fn from_iter<I: IntoIterator<Item = Resonance>>(resonances: I) -> Self {
+        let mut resonances: Vec<Resonance> = resonances
+            .into_iter()
+            .inspect(|res| debug_assert!(!res.eps.is_nan(), "res.eps must not be NaN"))
+            .filter(|res| res.weight != 0.0)
+            .map(|res| Resonance {
+                // canonicalize -0.0 so that it groups with 0.0 under total_cmp
+                eps: if res.eps == 0.0 { 0.0 } else { res.eps },
+                weight: res.weight,
+            })
+            .collect();
+        resonances.sort_by(|r1, r2| r1.eps.total_cmp(&r2.eps));
+        canonicalize(&mut resonances);
+        DiscreteDOS { resonances }
     }
 }
 
+/// Addition of two discrete densities of states.
+impl Add for DiscreteDOS {
+    type Output = Self;
+
+    fn add(self, rhs: Self) -> Self {
+        let (lhs, rhs) = (self.resonances, rhs.resonances);
+        let mut resonances = Vec::with_capacity(lhs.len() + rhs.len());
+
+        let (mut l, mut r) = (lhs.iter().peekable(), rhs.iter().peekable());
+        loop {
+            let ordering = match (l.peek(), r.peek()) {
+                (Some(rl), Some(rr)) => rl.eps.total_cmp(&rr.eps),
+                (Some(_), None) => std::cmp::Ordering::Less,
+                (None, Some(_)) => std::cmp::Ordering::Greater,
+                (None, None) => break,
+            };
+            match ordering {
+                std::cmp::Ordering::Less => resonances.push(*l.next().unwrap()),
+                std::cmp::Ordering::Greater => resonances.push(*r.next().unwrap()),
+                std::cmp::Ordering::Equal => {
+                    // Both operands are duplicate-free, so exactly two weights meet here
+                    // and their sum needs no compensation to be correctly rounded.
+                    let (rl, rr) = (l.next().unwrap(), r.next().unwrap());
+                    let weight = rl.weight + rr.weight;
+                    // Drop the resonance if the contributions cancel each other out
+                    let tol = DiscreteDOS::WEIGHT_TOL;
+                    if weight.abs() > tol * (rl.weight.abs() + rr.weight.abs()) {
+                        resonances.push(Resonance {
+                            eps: rl.eps,
+                            weight,
+                        });
+                    }
+                }
+            }
+        }
+        DiscreteDOS { resonances }
+    }
+}
+
+/// Multiply all spectral weights by a real number from the right.
+impl Mul<f64> for DiscreteDOS {
+    type Output = Self;
+
+    fn mul(mut self, a: f64) -> Self {
+        if a == 0.0 {
+            self.resonances.clear();
+        } else {
+            // Scaling preserves both the ordering w.r.t. ε and the absence of duplicates.
+            // A weight can, however, underflow to zero and has to be dropped to keep the
+            // list free of negligible weights.
+            self.resonances.retain_mut(|res| {
+                res.weight *= a;
+                res.weight != 0.0
+            });
+        }
+        self
+    }
+}
+
+/// Multiply all spectral weights by a real number from the left.
+impl Mul<DiscreteDOS> for f64 {
+    type Output = DiscreteDOS;
+    fn mul(self, dos: DiscreteDOS) -> DiscreteDOS {
+        dos * self
+    }
+}
+
+/// Iterate over the resonances in the order of increasing $\varepsilon_p$.
+impl<'a> IntoIterator for &'a DiscreteDOS {
+    type Item = &'a Resonance;
+    type IntoIter = std::slice::Iter<'a, Resonance>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.resonances.iter()
+    }
+}
+
+/// Merge resonances sharing the same position within an ε-sorted list, and remove
+/// the groups whose total weight is negligible. Called on a freshly sorted list, this
+/// establishes the canonical form.
+fn canonicalize(resonances: &mut Vec<Resonance>) {
+    let (mut w, mut i) = (0, 0);
+    while i < resonances.len() {
+        // Find a slice of resonances sharing the same ε
+        let start = i;
+        let eps = resonances[i].eps;
+        while i < resonances.len() && resonances[i].eps == eps {
+            i += 1;
+        }
+
+        // A lone resonance needs no summation and can only be negligible
+        // w.r.t. itself, which `total.abs() > tol * mag` never is
+        if i == start + 1 {
+            resonances[w] = resonances[start];
+            w += 1;
+            continue;
+        }
+
+        // Sum all weights within the slice, with Neumaier compensation
+        let group = &mut resonances[start..i];
+        group.sort_unstable_by(|r1, r2| r1.weight.abs().total_cmp(&r2.weight.abs()));
+        let total = util::kahan_babushka_neumaier_sum(group.iter().map(|r| r.weight));
+
+        // Keep the resonance if its total weight is not too small compared
+        // to the total magnitude of the weights
+        let mag: f64 = group.iter().map(|r| r.weight.abs()).sum();
+        if total.abs() > DiscreteDOS::WEIGHT_TOL * mag {
+            resonances[w] = Resonance { eps, weight: total };
+            w += 1;
+        }
+    }
+    // Remove the unused elements
+    resonances.truncate(w);
+}
+
 impl DiscreteDOS {
+    /// Relative tolerance below which the total weight of a group of resonances sharing
+    /// the same position is considered a cancellation artefact and is discarded.
+    pub const WEIGHT_TOL: f64 = f64::EPSILON;
+
     /// Make an empty discrete DOS (zero resonances)
     pub fn new() -> Self {
         Self::default()
@@ -43,147 +173,55 @@ impl DiscreteDOS {
 
     /// Make a discrete DOS with one resonance
     pub fn one_resonance(eps: f64, weight: f64) -> DiscreteDOS {
-        let mut dos = DiscreteDOS::new();
-        dos.add(&Resonance { eps, weight });
-        dos
+        DiscreteDOS::from_iter([Resonance { eps, weight }])
     }
 
-    /// Rebuild and access the resonance list in its canonical form (sorted w.r.t.
-    /// $\varepsilon_p$, deduplicated, free of negligible weights).
-    pub fn resonances(&mut self) -> &[Resonance] {
-        if self.clean != self.resonances.len() {
-            self.prune();
-        }
+    /// Access the resonance list in its canonical form (sorted w.r.t. $\varepsilon_p$,
+    /// deduplicated, free of negligible weights).
+    pub fn resonances(&self) -> &[Resonance] {
         &self.resonances
     }
 
-    /// Iterate over the resonances in their current, possibly non-canonical order.
-    pub fn iter(&self) -> impl Iterator<Item = &Resonance> {
+    /// Number of resonances in the DOS
+    pub fn len(&self) -> usize {
+        self.resonances.len()
+    }
+
+    /// Does the DOS carry no resonances?
+    pub fn is_empty(&self) -> bool {
+        self.resonances.is_empty()
+    }
+
+    /// Iterate over the resonances in the order of increasing $\varepsilon_p$.
+    pub fn iter(&self) -> std::slice::Iter<'_, Resonance> {
         self.resonances.iter()
     }
 
-    /// Consume the DOS and return its resonance list in its current,
-    /// possibly non-canonical order.
+    /// Consume the DOS and return its resonance list in the canonical form.
     pub fn into_resonances(self) -> Vec<Resonance> {
         self.resonances
     }
 
-    /// Total spectral weight of the DOS
+    /// Support of the DOS, i.e. the positions of its lowest and highest resonances.
+    /// Returns [`None`] for an empty DOS.
+    pub fn support(&self) -> Option<(f64, f64)> {
+        Some((self.resonances.first()?.eps, self.resonances.last()?.eps))
+    }
+
+    /// Total spectral weight of the DOS.
     pub fn norm(&self) -> f64 {
         util::kahan_babushka_neumaier_sum(self.iter().map(|r| r.weight))
     }
 
-    /// Add a resonance to the DOS
-    pub fn add(&mut self, res: &Resonance) {
-        debug_assert!(!res.eps.is_nan(), "res.eps must not be NaN");
-        self.push(res);
-        self.prune_if_needed();
-    }
-
-    /// Add a batch of resonances to the DOS, canonicalizing the list at most once
-    pub fn extend<I: IntoIterator<Item = Resonance>>(&mut self, resonances: I) {
-        let iter = resonances.into_iter();
-        self.resonances.reserve(iter.size_hint().0);
-        for res in iter {
-            debug_assert!(!res.eps.is_nan(), "res.eps must not be NaN");
-            self.push(&res);
-        }
-        self.prune_if_needed();
-    }
-
-    /// Multiply all spectral weights by a real number
-    pub fn scale(&mut self, a: f64) {
-        if a == 0.0 {
-            self.resonances.clear();
-            self.clean = 0;
-            return;
-        }
-
-        // Scaling preserves both the ordering w.r.t. ε and the absence of duplicates,
-        // so the canonical prefix survives. A weight can, however, underflow to zero
-        // and has to be dropped to keep the prefix zero-weight-free.
-        let (mut w, mut clean) = (0, self.clean);
-        for i in 0..self.resonances.len() {
-            let weight = self.resonances[i].weight * a;
-            if weight == 0.0 {
-                clean -= usize::from(i < self.clean);
-            } else {
-                self.resonances[w] = Resonance {
-                    eps: self.resonances[i].eps,
-                    weight,
-                };
-                w += 1;
-            }
-        }
-        self.resonances.truncate(w);
-        self.clean = clean;
-    }
-
-    /// Append a resonance to the (possibly unsorted) resonance list
-    fn push(&mut self, res: &Resonance) {
-        if res.weight != 0.0 {
-            // canonicalize -0.0 so it groups with 0.0 under total_cmp
-            self.resonances.push(Resonance {
-                eps: if res.eps == 0.0 { 0.0 } else { res.eps },
-                weight: res.weight,
-            });
-        }
-    }
-
-    /// Canonicalize the resonance list once its unsorted tail has grown big enough.
-    ///
-    /// The threshold makes `self.clean` grow geometrically between calls, so a
-    /// sequence of N additions triggers O(log N) prunes and costs O(N log N) in
-    /// total, i.e. O(log N) amortized per addition.
-    fn prune_if_needed(&mut self) {
-        if self.resonances.len() > 2 * self.clean + 16 {
-            self.prune();
-        }
-    }
-
-    /// Sort, deduplicate and remove small-weight resonances
-    fn prune(&mut self) {
-        // The singleton fast path below relies on the tolerance being relative
-        debug_assert!(self.tol < 1.0, "tol must be a relative tolerance");
-
-        // Sort the resonances w.r.t. ε. `resonances[..clean]` is already sorted,
-        // which the stable sort detects as a run and merges rather than re-sorts.
-        let res = &mut self.resonances;
-        res.sort_by(|r1, r2| r1.eps.total_cmp(&r2.eps));
-
-        let (mut w, mut i) = (0, 0);
-        while i < res.len() {
-            // Find a slice of self.resonances sharing the same ε
-            let start = i;
-            let eps = res[i].eps;
-            while i < res.len() && res[i].eps == eps {
-                i += 1;
-            }
-
-            // A lone resonance needs no summation and can only be negligible
-            // w.r.t. itself, which `total.abs() > self.tol * mag` never is
-            if i == start + 1 {
-                res[w] = res[start];
-                w += 1;
-                continue;
-            }
-
-            // Sum all weights within the slice, with Neumaier compensation
-            let group = &mut res[start..i];
-            group.sort_unstable_by(|r1, r2| r1.weight.abs().total_cmp(&r2.weight.abs()));
-            let total = util::kahan_babushka_neumaier_sum(group.iter().map(|r| r.weight));
-
-            // Add a resonance to the result if the total weight is not too small compared
-            // to the total magnitude of the weights
-            let mag: f64 = group.iter().map(|r| r.weight.abs()).sum();
-            if total.abs() > self.tol * mag {
-                res[w] = Resonance { eps, weight: total };
-                w += 1;
-            }
-        }
-        // Remove unused elements of self.resonances
-        res.truncate(w);
-        self.clean = w;
+    /// Find the resonance located at a given position $\varepsilon$, if any.
+    pub fn find(&self, eps: f64) -> Option<&Resonance> {
+        // -0.0 is stored as 0.0, so the same canonicalization applies to the needle
+        let eps = if eps == 0.0 { 0.0 } else { eps };
+        let index = self
+            .resonances
+            .binary_search_by(|res| res.eps.total_cmp(&eps))
+            .ok()?;
+        Some(&self.resonances[index])
     }
 }
 
@@ -194,40 +232,36 @@ mod tests {
 
     #[test]
     fn discrete_dos() {
-        let mut dos = DiscreteDOS::new();
+        let dos = DiscreteDOS::new();
+        assert!(dos.is_empty());
         assert_eq!(dos.resonances().len(), 0);
         assert_eq!(dos.norm(), 0.0);
+        assert_eq!(dos.support(), None);
 
-        let mut dos = DiscreteDOS::one_resonance(2.0, 1.0);
-        assert_eq!(dos.resonances().len(), 1);
+        let dos = DiscreteDOS::one_resonance(2.0, 1.0);
+        assert_eq!(dos.len(), 1);
         assert_eq!(dos.resonances()[0].eps, 2.0);
         assert_eq!(dos.resonances()[0].weight, 1.0);
         assert_eq!(dos.norm(), 1.0);
+        assert_eq!(dos.support(), Some((2.0, 2.0)));
 
-        dos.add(&Resonance {
-            eps: -1.5,
-            weight: 0.25,
-        });
-        assert_eq!(dos.resonances().len(), 2);
+        // A resonance of zero weight is not a resonance
+        assert!(DiscreteDOS::one_resonance(2.0, 0.0).is_empty());
+
+        let dos = dos + DiscreteDOS::one_resonance(-1.5, 0.25);
+        assert_eq!(dos.len(), 2);
         assert_eq!(dos.norm(), 1.25);
-        dos.add(&Resonance {
-            eps: 2.0,
-            weight: -1.0,
-        });
-        assert_eq!(dos.resonances().len(), 1);
+        assert_eq!(dos.support(), Some((-1.5, 2.0)));
+
+        // Exactly cancelling contributions annihilate the resonance
+        let dos = dos + DiscreteDOS::one_resonance(2.0, -1.0);
+        assert_eq!(dos.len(), 1);
         assert_eq!(dos.norm(), 0.25);
-        dos.add(&Resonance {
-            eps: 5.0,
-            weight: 0.0,
-        });
-        assert_eq!(dos.resonances().len(), 1);
-        assert_eq!(dos.norm(), 0.25);
+        assert_eq!(dos.support(), Some((-1.5, -1.5)));
     }
 
     #[test]
-    fn discrete_dos_extend() {
-        // A batch big enough to make `add()` defer the pruning work: the
-        // canonical form must be the same either way
+    fn discrete_dos_from_iter() {
         let batch: Vec<Resonance> = (0..100)
             .map(|n| Resonance {
                 eps: ((n * 37) % 20) as f64 - 10.0,
@@ -235,57 +269,74 @@ mod tests {
             })
             .collect();
 
-        let mut one_by_one = DiscreteDOS::new();
-        for res in &batch {
-            one_by_one.add(res);
-        }
-        let mut bulk = DiscreteDOS::new();
-        bulk.extend(batch.iter().copied());
+        // Building in one go and accumulating pairwise give the same canonical form
+        let bulk = DiscreteDOS::from_iter(batch.iter().copied());
+        let one_by_one = batch.iter().fold(DiscreteDOS::new(), |dos, res| {
+            dos + DiscreteDOS::one_resonance(res.eps, res.weight)
+        });
 
         // 20 distinct levels, each hit 5 times
-        assert_eq!(bulk.resonances().len(), 20);
+        assert_eq!(bulk.len(), 20);
         assert_relative_eq!(bulk.norm(), 1.0, epsilon = 1e-15);
-        for (r1, r2) in bulk.resonances().iter().zip(one_by_one.resonances()) {
+        assert_eq!(bulk.support(), Some((-10.0, 9.0)));
+        for (r1, r2) in bulk.iter().zip(&one_by_one) {
             assert_eq!(r1.eps, r2.eps);
-            assert_eq!(r1.weight, r2.weight);
+            assert_relative_eq!(r1.weight, r2.weight, epsilon = 1e-15);
         }
         // Sorted w.r.t. ε and free of duplicates
         assert!(bulk.resonances().windows(2).all(|w| w[0].eps < w[1].eps));
 
         // Exactly cancelling contributions are dropped, keeping the survivors
-        bulk.extend(batch.iter().map(|r| Resonance {
-            eps: r.eps,
-            weight: if r.eps < 0.0 { -r.weight } else { 0.0 },
-        }));
-        assert_eq!(bulk.resonances().len(), 10);
-        assert!(bulk.resonances().iter().all(|r| r.eps >= 0.0));
-        assert_relative_eq!(bulk.norm(), 0.5, epsilon = 1e-15);
+        let dos = bulk
+            + DiscreteDOS::from_iter(batch.iter().filter(|r| r.eps < 0.0).map(|r| Resonance {
+                eps: r.eps,
+                weight: -r.weight,
+            }));
+        assert_eq!(dos.len(), 10);
+        assert!(dos.iter().all(|r| r.eps >= 0.0));
+        assert_relative_eq!(dos.norm(), 0.5, epsilon = 1e-15);
     }
 
     #[test]
-    fn discrete_dos_scale() {
-        let mut dos = DiscreteDOS::one_resonance(2.0, 1.0);
-        dos.add(&Resonance {
-            eps: -1.5,
-            weight: 0.25,
-        });
+    fn discrete_dos_find() {
+        let dos = DiscreteDOS::from_iter((0..64).map(|n| Resonance {
+            eps: (n - 32) as f64 / 2.0,
+            weight: 1.0 / 64.0,
+        }));
 
-        dos.scale(4.0);
-        assert_eq!(dos.resonances().len(), 2);
+        for n in 0..64 {
+            let eps = (n - 32) as f64 / 2.0;
+            assert_eq!(dos.find(eps).unwrap().eps, eps);
+            assert_eq!(dos.find(eps).unwrap().weight, 1.0 / 64.0);
+        }
+        assert!(dos.find(0.25).is_none());
+        assert!(dos.find(100.0).is_none());
+        // -0.0 and 0.0 denote the same position
+        assert_eq!(dos.find(-0.0).unwrap().eps, 0.0);
+        assert_eq!(
+            DiscreteDOS::one_resonance(-0.0, 1.0).find(0.0).unwrap().eps,
+            0.0
+        );
+    }
+
+    #[test]
+    fn discrete_dos_mul() {
+        let dos = DiscreteDOS::one_resonance(2.0, 1.0) + DiscreteDOS::one_resonance(-1.5, 0.25);
+
+        let dos = dos * 4.0;
+        assert_eq!(dos.len(), 2);
         assert_eq!(dos.resonances()[0].weight, 1.0);
         assert_eq!(dos.resonances()[1].weight, 4.0);
         assert_eq!(dos.norm(), 5.0);
 
         // Weights underflowing to zero are dropped
-        dos.scale(f64::MIN_POSITIVE);
-        dos.scale(f64::MIN_POSITIVE);
-        assert_eq!(dos.resonances().len(), 0);
+        let dos = f64::MIN_POSITIVE * (f64::MIN_POSITIVE * dos);
+        assert!(dos.is_empty());
         assert_eq!(dos.norm(), 0.0);
 
         // Scaling by zero empties the DOS
-        let mut dos = DiscreteDOS::one_resonance(2.0, 1.0);
-        dos.scale(0.0);
-        assert_eq!(dos.resonances().len(), 0);
+        let dos = DiscreteDOS::one_resonance(2.0, 1.0) * 0.0;
+        assert!(dos.is_empty());
         assert_eq!(dos.norm(), 0.0);
     }
 }

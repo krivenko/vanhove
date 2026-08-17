@@ -64,10 +64,8 @@ impl Mul<f64> for DensityOfStates {
                 continuous: vec![],
             }
         } else {
-            let mut discrete: DiscreteDOS = self.discrete.clone();
-            discrete.scale(a);
             Self {
-                discrete,
+                discrete: self.discrete * a,
                 continuous: self
                     .continuous
                     .into_iter()
@@ -88,12 +86,12 @@ impl Mul<DensityOfStates> for f64 {
 impl Add for DensityOfStates {
     type Output = Self;
     fn add(self, rhs: DensityOfStates) -> DensityOfStates {
-        // Discrete part
-        let mut sum = self;
-        sum.discrete.extend(rhs.discrete.into_resonances());
-        // Continuous part
-        sum.continuous.extend(rhs.continuous);
-        sum
+        let mut continuous = self.continuous;
+        continuous.extend(rhs.continuous);
+        DensityOfStates {
+            discrete: self.discrete + rhs.discrete,
+            continuous,
+        }
     }
 }
 impl DensityOfStates {
