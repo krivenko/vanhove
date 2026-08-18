@@ -52,7 +52,7 @@ impl FlatDOS {
 }
 impl ContinuousDOS for FlatDOS {
     fn support(&self) -> (f64, f64) {
-        (-f64::INFINITY, f64::INFINITY)
+        (f64::NEG_INFINITY, f64::INFINITY)
     }
     fn regular(&self, omega: f64) -> f64 {
         self.prefactor
@@ -93,7 +93,7 @@ impl GaussianDOS {
 }
 impl ContinuousDOS for GaussianDOS {
     fn support(&self) -> (f64, f64) {
-        (-f64::INFINITY, f64::INFINITY)
+        (f64::NEG_INFINITY, f64::INFINITY)
     }
     fn regular(&self, omega: f64) -> f64 {
         self.prefactor * (-(omega - self.eps).powi(2) / self.denom).exp()
