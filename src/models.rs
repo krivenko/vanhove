@@ -1,12 +1,11 @@
 //! Model densities of states commonly used in physics
 
-use crate::discrete::{DiscreteDOS, Resonance};
+use crate::discrete::Resonance;
 use crate::util::fermi;
 use crate::{ContinuousDOS, DensityOfStates};
 
 use special::Elliptic;
 use std::f64::consts::PI;
-use std::rc::Rc;
 
 //
 // Discrete DOS
@@ -18,14 +17,14 @@ use std::rc::Rc;
 ///     A(\omega) = \sum_p w_p \delta(\omega - \varepsilon_p).
 /// $$
 pub fn discrete(levels: &[f64], weights: &[f64]) -> DensityOfStates {
-    DensityOfStates {
-        discrete: levels
+    DensityOfStates::from_discrete_continuous(
+        levels
             .iter()
             .zip(weights)
             .map(|(&eps, &weight)| Resonance { eps, weight })
             .collect(),
-        continuous: vec![],
-    }
+        vec![],
+    )
 }
 
 //
@@ -69,10 +68,7 @@ impl ContinuousDOS for FlatDOS {
 ///         \frac{1}{(e^{\nu(\omega-\epsilon-d)}+1)(e^{-\nu(\omega-\epsilon+d)}+1)}.
 /// $$
 pub fn flat(eps: f64, d: f64, nu: f64) -> DensityOfStates {
-    DensityOfStates {
-        discrete: DiscreteDOS::new(),
-        continuous: vec![(Rc::new(FlatDOS::new(eps, d, nu)), 1.0)],
-    }
+    DensityOfStates::from_continuous(FlatDOS::new(eps, d, nu))
 }
 
 //
@@ -110,10 +106,7 @@ impl ContinuousDOS for GaussianDOS {
 ///         \exp\left(-\frac{(\omega - \epsilon)^2}{2\sigma^2}\right).
 /// $$
 pub fn gaussian(eps: f64, sigma: f64) -> DensityOfStates {
-    DensityOfStates {
-        discrete: DiscreteDOS::new(),
-        continuous: vec![(Rc::new(GaussianDOS::new(eps, sigma)), 1.0)],
-    }
+    DensityOfStates::from_continuous(GaussianDOS::new(eps, sigma))
 }
 
 //
@@ -174,10 +167,7 @@ impl ContinuousDOS for SemicircleDOS {
 ///     A(\omega) = \frac{2}{\pi r^2} \sqrt{r^2 - \omega^2}\theta(r^2 - \omega^2).
 /// $$
 pub fn semicircle(eps: f64, r: f64) -> DensityOfStates {
-    DensityOfStates {
-        discrete: DiscreteDOS::new(),
-        continuous: vec![(Rc::new(SemicircleDOS::new(eps, r)), 1.0)],
-    }
+    DensityOfStates::from_continuous(SemicircleDOS::new(eps, r))
 }
 
 //
@@ -249,10 +239,7 @@ impl ContinuousDOS for ChainDOS {
 ///         \theta((2t)^2 - (\omega-\epsilon)^2).
 /// $$
 pub fn chain(eps: f64, t: f64) -> DensityOfStates {
-    DensityOfStates {
-        discrete: DiscreteDOS::new(),
-        continuous: vec![(Rc::new(ChainDOS::new(eps, t)), 1.0)],
-    }
+    DensityOfStates::from_continuous(ChainDOS::new(eps, t))
 }
 
 //
@@ -326,10 +313,7 @@ impl ContinuousDOS for SquareDOS {
 /// $$
 /// where $K(m)$ is the complete elliptic integral of the first kind.
 pub fn square(eps: f64, t: f64) -> DensityOfStates {
-    DensityOfStates {
-        discrete: DiscreteDOS::new(),
-        continuous: vec![(Rc::new(SquareDOS::new(eps, t)), 1.0)],
-    }
+    DensityOfStates::from_continuous(SquareDOS::new(eps, t))
 }
 
 #[cfg(test)]

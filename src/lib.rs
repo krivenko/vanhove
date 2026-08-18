@@ -46,9 +46,12 @@ trait ContinuousDOS {
 /// Density of states as a weighted sum of discrete resonances and continuous contributions.
 #[derive(Clone)]
 pub struct DensityOfStates {
-    // Contributions of discrete resonances
+    // Contributions of discrete resonances.
     discrete: DiscreteDOS,
-    // Continuous contributions with their weights
+    // Continuous contributions with their weights.
+    // Invariant: all weights are non-zero. A vanishing weight adds nothing to the
+    // DOS, while still consuming memory and complicating the algorithms that
+    // traverse this list.
     continuous: Vec<(Rc<dyn ContinuousDOS>, f64)>,
 }
 
@@ -57,22 +60,15 @@ impl Mul<f64> for DensityOfStates {
     type Output = Self;
 
     fn mul(self, a: f64) -> Self {
-        if a == 0.0 {
-            // DOS with no contributions
-            Self {
-                discrete: DiscreteDOS::new(),
-                continuous: vec![],
-            }
-        } else {
-            Self {
-                discrete: self.discrete * a,
-                continuous: self
-                    .continuous
-                    .into_iter()
-                    .map(|(cd, w)| (cd, w * a))
-                    .collect(),
-            }
-        }
+        // A weight can vanish upon scaling, either exactly for a == 0 or by underflow.
+        // Such contributions are dropped by `from_discrete_continuous()`.
+        Self::from_discrete_continuous(
+            self.discrete * a,
+            self.continuous
+                .into_iter()
+                .map(|(cd, w)| (cd, w * a))
+                .collect(),
+        )
     }
 }
 /// Multiply DOS by a real number from the left.
@@ -88,6 +84,7 @@ impl Add for DensityOfStates {
     fn add(self, rhs: DensityOfStates) -> DensityOfStates {
         let mut continuous = self.continuous;
         continuous.extend(rhs.continuous);
+        // Concatenation of two invariant-abiding lists needs no further filtering
         DensityOfStates {
             discrete: self.discrete + rhs.discrete,
             continuous,
@@ -95,6 +92,24 @@ impl Add for DensityOfStates {
     }
 }
 impl DensityOfStates {
+    /// Build a `DensityOfStates` from a discrete DOS and a list of continuous contributions
+    /// with their weights. Contributions of zero weight are dropped.
+    fn from_discrete_continuous(
+        ddos: DiscreteDOS,
+        mut cdos: Vec<(Rc<dyn ContinuousDOS>, f64)>,
+    ) -> DensityOfStates {
+        cdos.retain(|(_, w)| *w != 0.0);
+        DensityOfStates {
+            discrete: ddos,
+            continuous: cdos,
+        }
+    }
+
+    /// Build a `DensityOfStates` out of a single continuous contribution of unit weight.
+    fn from_continuous<C: ContinuousDOS + 'static>(cdos: C) -> DensityOfStates {
+        DensityOfStates::from_discrete_continuous(DiscreteDOS::new(), vec![(Rc::new(cdos), 1.0)])
+    }
+
     /// Total spectral weight of the density of states.
     pub fn norm(&self) -> f64 {
         self.discrete.norm() + self.continuous.iter().map(|(_, w)| w).sum::<f64>()
@@ -207,6 +222,25 @@ mod tests {
     fn norm() {
         let dos = 2.0 * discrete(&[-0.7, 1.2], &[0.25, 0.6]) + 5.0 * gaussian(1.4, 0.5);
         assert_relative_eq!(dos.norm(), 6.7, epsilon = 1e-12);
+    }
+
+    #[test]
+    fn mul() {
+        let dos = 2.0 * discrete(&[-0.7, 1.2], &[0.25, 0.6]) + 5.0 * gaussian(1.4, 0.5);
+        assert_eq!(dos.discrete.len(), 2);
+        assert_eq!(dos.continuous.len(), 1);
+
+        // Weights underflowing to zero are dropped
+        let scaled = f64::MIN_POSITIVE * (f64::MIN_POSITIVE * dos.clone());
+        assert!(scaled.discrete.is_empty());
+        assert!(scaled.continuous.is_empty());
+        assert_eq!(scaled.norm(), 0.0);
+
+        // Scaling by zero empties the DOS
+        let scaled = dos * 0.0;
+        assert!(scaled.discrete.is_empty());
+        assert!(scaled.continuous.is_empty());
+        assert_eq!(scaled.norm(), 0.0);
     }
 
     #[test]
