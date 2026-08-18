@@ -110,6 +110,18 @@ impl DensityOfStates {
         DensityOfStates::from_discrete_continuous(DiscreteDOS::new(), vec![(Rc::new(cdos), 1.0)])
     }
 
+    /// Support of the DOS, i.e. the smallest segment $[\omega_{min}, \omega_{max}]$
+    /// containing the supports of all its contributions. The segment is not
+    /// necessarily tight: the DOS may vanish within the gaps between disjoint
+    /// contributions. Returns [`None`] for an empty DOS.
+    pub fn support(&self) -> Option<(f64, f64)> {
+        self.continuous
+            .iter()
+            .map(|(cd, _)| cd.support())
+            .chain(self.discrete.support())
+            .reduce(|hull, sup| (hull.0.min(sup.0), hull.1.max(sup.1)))
+    }
+
     /// Total spectral weight of the density of states.
     pub fn norm(&self) -> f64 {
         self.discrete.norm() + self.continuous.iter().map(|(_, w)| w).sum::<f64>()
@@ -222,6 +234,32 @@ mod tests {
     fn norm() {
         let dos = 2.0 * discrete(&[-0.7, 1.2], &[0.25, 0.6]) + 5.0 * gaussian(1.4, 0.5);
         assert_relative_eq!(dos.norm(), 6.7, epsilon = 1e-12);
+    }
+
+    #[test]
+    fn support() {
+        // An empty DOS has no support
+        assert_eq!(discrete(&[], &[]).support(), None);
+        assert_eq!((gaussian(1.4, 0.5) * 0.0).support(), None);
+
+        // Discrete contributions alone: positions of the outermost resonances
+        assert_eq!(
+            discrete(&[-0.7, 1.2, 0.3], &[0.25, 0.6, 0.15]).support(),
+            Some((-0.7, 1.2))
+        );
+
+        // A single continuous contribution: its band edges
+        assert_eq!(chain(0.5, 1.0).support(), Some((-1.5, 2.5)));
+
+        // Mixed contributions: the hull of all supports. Neither the resonance at 0.0
+        // nor the narrower square lattice band widens the chain band, the resonance
+        // at 5.0 does.
+        let dos = discrete(&[0.0, 5.0], &[0.3, 0.3]) + chain(0.5, 1.0) + square(0.0, 0.25);
+        assert_eq!(dos.support(), Some((-1.5, 5.0)));
+
+        // An unbounded contribution makes the whole support unbounded
+        let dos = discrete(&[-0.7], &[0.5]) + gaussian(1.4, 0.5);
+        assert_eq!(dos.support(), Some((f64::NEG_INFINITY, f64::INFINITY)));
     }
 
     #[test]
