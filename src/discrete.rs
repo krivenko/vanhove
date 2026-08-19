@@ -1,4 +1,4 @@
-//! Discrete density of states
+//! Discrete spectral function
 
 use std::ops::{Add, Mul};
 
@@ -13,7 +13,7 @@ pub struct Resonance {
     pub weight: f64,
 }
 
-/// Discrete density of states with a finite number of resonances,
+/// Discrete spectral function with a finite number of resonances,
 /// $$
 ///     A(\omega) = \sum_p w_p \delta(\omega - \varepsilon_p).
 /// $$
@@ -22,14 +22,15 @@ pub struct Resonance {
 /// canonical form: sorted w.r.t. $\varepsilon_p$, free of duplicate positions and
 /// free of negligible weights.
 #[derive(Debug, Clone, Default)]
-pub struct DiscreteDOS {
+pub struct DiscreteSF {
     /// Resonances $(\varepsilon_p, w_p)$ in the canonical form
     resonances: Vec<Resonance>,
 }
 
-/// Build a discrete DOS out of resonances given in an arbitrary order. Resonances
-/// sharing a position are merged, and groups whose total weight cancels out are dropped.
-impl FromIterator<Resonance> for DiscreteDOS {
+/// Build a discrete spectral function out of resonances given in an arbitrary
+/// order. Resonances sharing a position are merged, and groups whose total weight
+/// cancels out are dropped.
+impl FromIterator<Resonance> for DiscreteSF {
     fn from_iter<I: IntoIterator<Item = Resonance>>(resonances: I) -> Self {
         let mut resonances: Vec<Resonance> = resonances
             .into_iter()
@@ -43,12 +44,12 @@ impl FromIterator<Resonance> for DiscreteDOS {
             .collect();
         resonances.sort_by(|r1, r2| r1.eps.total_cmp(&r2.eps));
         canonicalize(&mut resonances);
-        DiscreteDOS { resonances }
+        DiscreteSF { resonances }
     }
 }
 
-/// Addition of two discrete densities of states.
-impl Add for DiscreteDOS {
+/// Addition of two discrete spectral functions.
+impl Add for DiscreteSF {
     type Output = Self;
 
     fn add(self, rhs: Self) -> Self {
@@ -72,7 +73,7 @@ impl Add for DiscreteDOS {
                     let (rl, rr) = (l.next().unwrap(), r.next().unwrap());
                     let weight = rl.weight + rr.weight;
                     // Drop the resonance if the contributions cancel each other out
-                    let tol = DiscreteDOS::WEIGHT_TOL;
+                    let tol = DiscreteSF::WEIGHT_TOL;
                     if weight.abs() > tol * (rl.weight.abs() + rr.weight.abs()) {
                         resonances.push(Resonance {
                             eps: rl.eps,
@@ -82,12 +83,12 @@ impl Add for DiscreteDOS {
                 }
             }
         }
-        DiscreteDOS { resonances }
+        DiscreteSF { resonances }
     }
 }
 
 /// Multiply all spectral weights by a real number from the right.
-impl Mul<f64> for DiscreteDOS {
+impl Mul<f64> for DiscreteSF {
     type Output = Self;
 
     fn mul(mut self, a: f64) -> Self {
@@ -107,15 +108,15 @@ impl Mul<f64> for DiscreteDOS {
 }
 
 /// Multiply all spectral weights by a real number from the left.
-impl Mul<DiscreteDOS> for f64 {
-    type Output = DiscreteDOS;
-    fn mul(self, dos: DiscreteDOS) -> DiscreteDOS {
-        dos * self
+impl Mul<DiscreteSF> for f64 {
+    type Output = DiscreteSF;
+    fn mul(self, sf: DiscreteSF) -> DiscreteSF {
+        sf * self
     }
 }
 
 /// Iterate over the resonances in the order of increasing $\varepsilon_p$.
-impl<'a> IntoIterator for &'a DiscreteDOS {
+impl<'a> IntoIterator for &'a DiscreteSF {
     type Item = &'a Resonance;
     type IntoIter = std::slice::Iter<'a, Resonance>;
     fn into_iter(self) -> Self::IntoIter {
@@ -152,7 +153,7 @@ fn canonicalize(resonances: &mut Vec<Resonance>) {
         // Keep the resonance if its total weight is not too small compared
         // to the total magnitude of the weights
         let mag: f64 = group.iter().map(|r| r.weight.abs()).sum();
-        if total.abs() > DiscreteDOS::WEIGHT_TOL * mag {
+        if total.abs() > DiscreteSF::WEIGHT_TOL * mag {
             resonances[w] = Resonance { eps, weight: total };
             w += 1;
         }
@@ -161,19 +162,19 @@ fn canonicalize(resonances: &mut Vec<Resonance>) {
     resonances.truncate(w);
 }
 
-impl DiscreteDOS {
+impl DiscreteSF {
     /// Relative tolerance below which the total weight of a group of resonances sharing
     /// the same position is considered a cancellation artefact and is discarded.
     pub const WEIGHT_TOL: f64 = f64::EPSILON;
 
-    /// Make an empty discrete DOS (zero resonances)
+    /// Make an empty discrete spectral function (zero resonances)
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Make a discrete DOS with one resonance
-    pub fn one_resonance(eps: f64, weight: f64) -> DiscreteDOS {
-        DiscreteDOS::from_iter([Resonance { eps, weight }])
+    /// Make a discrete spectral function with one resonance
+    pub fn one_resonance(eps: f64, weight: f64) -> DiscreteSF {
+        DiscreteSF::from_iter([Resonance { eps, weight }])
     }
 
     /// Access the resonance list in its canonical form (sorted w.r.t. $\varepsilon_p$,
@@ -182,12 +183,12 @@ impl DiscreteDOS {
         &self.resonances
     }
 
-    /// Number of resonances in the DOS
+    /// Number of resonances in the spectral function
     pub fn len(&self) -> usize {
         self.resonances.len()
     }
 
-    /// Does the DOS carry no resonances?
+    /// Does the spectral function carry no resonances?
     pub fn is_empty(&self) -> bool {
         self.resonances.is_empty()
     }
@@ -197,19 +198,19 @@ impl DiscreteDOS {
         self.resonances.iter()
     }
 
-    /// Consume the DOS and return its resonance list in the canonical form.
+    /// Consume the spectral function and return its resonance list in the canonical form.
     pub fn into_resonances(self) -> Vec<Resonance> {
         self.resonances
     }
 
-    /// Support of the DOS, i.e. the positions of its lowest and highest resonances.
-    /// Returns [`None`] for an empty DOS.
+    /// Support of the spectral function, i.e. the positions of its lowest and
+    /// highest resonances. Returns [`None`] for an empty spectral function.
     pub fn support(&self) -> Option<(f64, f64)> {
         Some((self.resonances.first()?.eps, self.resonances.last()?.eps))
     }
 
-    /// Total spectral weight of the DOS.
-    pub fn norm(&self) -> f64 {
+    /// Total spectral weight.
+    pub fn total_weight(&self) -> f64 {
         util::kahan_babushka_neumaier_sum(self.iter().map(|r| r.weight))
     }
 
@@ -232,32 +233,32 @@ mod tests {
 
     #[test]
     fn discrete_dos() {
-        let dos = DiscreteDOS::new();
-        assert!(dos.is_empty());
-        assert_eq!(dos.resonances().len(), 0);
-        assert_eq!(dos.norm(), 0.0);
-        assert_eq!(dos.support(), None);
+        let sf = DiscreteSF::new();
+        assert!(sf.is_empty());
+        assert_eq!(sf.resonances().len(), 0);
+        assert_eq!(sf.total_weight(), 0.0);
+        assert_eq!(sf.support(), None);
 
-        let dos = DiscreteDOS::one_resonance(2.0, 1.0);
-        assert_eq!(dos.len(), 1);
-        assert_eq!(dos.resonances()[0].eps, 2.0);
-        assert_eq!(dos.resonances()[0].weight, 1.0);
-        assert_eq!(dos.norm(), 1.0);
-        assert_eq!(dos.support(), Some((2.0, 2.0)));
+        let sf = DiscreteSF::one_resonance(2.0, 1.0);
+        assert_eq!(sf.len(), 1);
+        assert_eq!(sf.resonances()[0].eps, 2.0);
+        assert_eq!(sf.resonances()[0].weight, 1.0);
+        assert_eq!(sf.total_weight(), 1.0);
+        assert_eq!(sf.support(), Some((2.0, 2.0)));
 
         // A resonance of zero weight is not a resonance
-        assert!(DiscreteDOS::one_resonance(2.0, 0.0).is_empty());
+        assert!(DiscreteSF::one_resonance(2.0, 0.0).is_empty());
 
-        let dos = dos + DiscreteDOS::one_resonance(-1.5, 0.25);
-        assert_eq!(dos.len(), 2);
-        assert_eq!(dos.norm(), 1.25);
-        assert_eq!(dos.support(), Some((-1.5, 2.0)));
+        let sf = sf + DiscreteSF::one_resonance(-1.5, 0.25);
+        assert_eq!(sf.len(), 2);
+        assert_eq!(sf.total_weight(), 1.25);
+        assert_eq!(sf.support(), Some((-1.5, 2.0)));
 
         // Exactly cancelling contributions annihilate the resonance
-        let dos = dos + DiscreteDOS::one_resonance(2.0, -1.0);
-        assert_eq!(dos.len(), 1);
-        assert_eq!(dos.norm(), 0.25);
-        assert_eq!(dos.support(), Some((-1.5, -1.5)));
+        let sf = sf + DiscreteSF::one_resonance(2.0, -1.0);
+        assert_eq!(sf.len(), 1);
+        assert_eq!(sf.total_weight(), 0.25);
+        assert_eq!(sf.support(), Some((-1.5, -1.5)));
     }
 
     #[test]
@@ -270,14 +271,14 @@ mod tests {
             .collect();
 
         // Building in one go and accumulating pairwise give the same canonical form
-        let bulk = DiscreteDOS::from_iter(batch.iter().copied());
-        let one_by_one = batch.iter().fold(DiscreteDOS::new(), |dos, res| {
-            dos + DiscreteDOS::one_resonance(res.eps, res.weight)
+        let bulk = DiscreteSF::from_iter(batch.iter().copied());
+        let one_by_one = batch.iter().fold(DiscreteSF::new(), |sf, res| {
+            sf + DiscreteSF::one_resonance(res.eps, res.weight)
         });
 
         // 20 distinct levels, each hit 5 times
         assert_eq!(bulk.len(), 20);
-        assert_relative_eq!(bulk.norm(), 1.0, epsilon = 1e-15);
+        assert_relative_eq!(bulk.total_weight(), 1.0, epsilon = 1e-15);
         assert_eq!(bulk.support(), Some((-10.0, 9.0)));
         for (r1, r2) in bulk.iter().zip(&one_by_one) {
             assert_eq!(r1.eps, r2.eps);
@@ -287,56 +288,56 @@ mod tests {
         assert!(bulk.resonances().windows(2).all(|w| w[0].eps < w[1].eps));
 
         // Exactly cancelling contributions are dropped, keeping the survivors
-        let dos = bulk
-            + DiscreteDOS::from_iter(batch.iter().filter(|r| r.eps < 0.0).map(|r| Resonance {
+        let sf = bulk
+            + DiscreteSF::from_iter(batch.iter().filter(|r| r.eps < 0.0).map(|r| Resonance {
                 eps: r.eps,
                 weight: -r.weight,
             }));
-        assert_eq!(dos.len(), 10);
-        assert!(dos.iter().all(|r| r.eps >= 0.0));
-        assert_relative_eq!(dos.norm(), 0.5, epsilon = 1e-15);
+        assert_eq!(sf.len(), 10);
+        assert!(sf.iter().all(|r| r.eps >= 0.0));
+        assert_relative_eq!(sf.total_weight(), 0.5, epsilon = 1e-15);
     }
 
     #[test]
     fn discrete_dos_find() {
-        let dos = DiscreteDOS::from_iter((0..64).map(|n| Resonance {
+        let sf = DiscreteSF::from_iter((0..64).map(|n| Resonance {
             eps: (n - 32) as f64 / 2.0,
             weight: 1.0 / 64.0,
         }));
 
         for n in 0..64 {
             let eps = (n - 32) as f64 / 2.0;
-            assert_eq!(dos.find(eps).unwrap().eps, eps);
-            assert_eq!(dos.find(eps).unwrap().weight, 1.0 / 64.0);
+            assert_eq!(sf.find(eps).unwrap().eps, eps);
+            assert_eq!(sf.find(eps).unwrap().weight, 1.0 / 64.0);
         }
-        assert!(dos.find(0.25).is_none());
-        assert!(dos.find(100.0).is_none());
+        assert!(sf.find(0.25).is_none());
+        assert!(sf.find(100.0).is_none());
         // -0.0 and 0.0 denote the same position
-        assert_eq!(dos.find(-0.0).unwrap().eps, 0.0);
+        assert_eq!(sf.find(-0.0).unwrap().eps, 0.0);
         assert_eq!(
-            DiscreteDOS::one_resonance(-0.0, 1.0).find(0.0).unwrap().eps,
+            DiscreteSF::one_resonance(-0.0, 1.0).find(0.0).unwrap().eps,
             0.0
         );
     }
 
     #[test]
     fn discrete_dos_mul() {
-        let dos = DiscreteDOS::one_resonance(2.0, 1.0) + DiscreteDOS::one_resonance(-1.5, 0.25);
+        let sf = DiscreteSF::one_resonance(2.0, 1.0) + DiscreteSF::one_resonance(-1.5, 0.25);
 
-        let dos = dos * 4.0;
-        assert_eq!(dos.len(), 2);
-        assert_eq!(dos.resonances()[0].weight, 1.0);
-        assert_eq!(dos.resonances()[1].weight, 4.0);
-        assert_eq!(dos.norm(), 5.0);
+        let sf = sf * 4.0;
+        assert_eq!(sf.len(), 2);
+        assert_eq!(sf.resonances()[0].weight, 1.0);
+        assert_eq!(sf.resonances()[1].weight, 4.0);
+        assert_eq!(sf.total_weight(), 5.0);
 
         // Weights underflowing to zero are dropped
-        let dos = f64::MIN_POSITIVE * (f64::MIN_POSITIVE * dos);
-        assert!(dos.is_empty());
-        assert_eq!(dos.norm(), 0.0);
+        let sf = f64::MIN_POSITIVE * (f64::MIN_POSITIVE * sf);
+        assert!(sf.is_empty());
+        assert_eq!(sf.total_weight(), 0.0);
 
-        // Scaling by zero empties the DOS
-        let dos = DiscreteDOS::one_resonance(2.0, 1.0) * 0.0;
-        assert!(dos.is_empty());
-        assert_eq!(dos.norm(), 0.0);
+        // Scaling by zero empties the spectral function
+        let sf = DiscreteSF::one_resonance(2.0, 1.0) * 0.0;
+        assert!(sf.is_empty());
+        assert_eq!(sf.total_weight(), 0.0);
     }
 }

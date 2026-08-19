@@ -2,7 +2,7 @@
 
 use crate::discrete::Resonance;
 use crate::util::fermi;
-use crate::{ContinuousDOS, DensityOfStates};
+use crate::{ContinuousSF, SpectralFunction};
 
 use special::Elliptic;
 use std::f64::consts::PI;
@@ -16,8 +16,8 @@ use std::f64::consts::PI;
 /// $$
 ///     A(\omega) = \sum_p w_p \delta(\omega - \varepsilon_p).
 /// $$
-pub fn discrete(levels: &[f64], weights: &[f64]) -> DensityOfStates {
-    DensityOfStates::from_discrete_continuous(
+pub fn discrete(levels: &[f64], weights: &[f64]) -> SpectralFunction {
+    SpectralFunction::from_discrete_continuous(
         levels
             .iter()
             .zip(weights)
@@ -50,7 +50,7 @@ impl FlatDOS {
         }
     }
 }
-impl ContinuousDOS for FlatDOS {
+impl ContinuousSF for FlatDOS {
     fn support(&self) -> (f64, f64) {
         (f64::NEG_INFINITY, f64::INFINITY)
     }
@@ -67,8 +67,8 @@ impl ContinuousDOS for FlatDOS {
 ///     A(\omega) = \frac{1}{d(1 + \coth(\nu d))}
 ///         \frac{1}{(e^{\nu(\omega-\epsilon-d)}+1)(e^{-\nu(\omega-\epsilon+d)}+1)}.
 /// $$
-pub fn flat(eps: f64, d: f64, nu: f64) -> DensityOfStates {
-    DensityOfStates::from_continuous(FlatDOS::new(eps, d, nu))
+pub fn flat(eps: f64, d: f64, nu: f64) -> SpectralFunction {
+    SpectralFunction::from_continuous(FlatDOS::new(eps, d, nu))
 }
 
 //
@@ -91,7 +91,7 @@ impl GaussianDOS {
         }
     }
 }
-impl ContinuousDOS for GaussianDOS {
+impl ContinuousSF for GaussianDOS {
     fn support(&self) -> (f64, f64) {
         (f64::NEG_INFINITY, f64::INFINITY)
     }
@@ -105,8 +105,8 @@ impl ContinuousDOS for GaussianDOS {
 ///     A(\omega) = \frac{1}{\sqrt{2\pi\sigma^2}}
 ///         \exp\left(-\frac{(\omega - \epsilon)^2}{2\sigma^2}\right).
 /// $$
-pub fn gaussian(eps: f64, sigma: f64) -> DensityOfStates {
-    DensityOfStates::from_continuous(GaussianDOS::new(eps, sigma))
+pub fn gaussian(eps: f64, sigma: f64) -> SpectralFunction {
+    SpectralFunction::from_continuous(GaussianDOS::new(eps, sigma))
 }
 
 //
@@ -133,7 +133,7 @@ impl SemicircleDOS {
         }
     }
 }
-impl ContinuousDOS for SemicircleDOS {
+impl ContinuousSF for SemicircleDOS {
     fn support(&self) -> (f64, f64) {
         self.edges.into()
     }
@@ -166,8 +166,8 @@ impl ContinuousDOS for SemicircleDOS {
 /// $$
 ///     A(\omega) = \frac{2}{\pi r^2} \sqrt{r^2 - \omega^2}\theta(r^2 - \omega^2).
 /// $$
-pub fn semicircle(eps: f64, r: f64) -> DensityOfStates {
-    DensityOfStates::from_continuous(SemicircleDOS::new(eps, r))
+pub fn semicircle(eps: f64, r: f64) -> SpectralFunction {
+    SpectralFunction::from_continuous(SemicircleDOS::new(eps, r))
 }
 
 //
@@ -194,7 +194,7 @@ impl ChainDOS {
         }
     }
 }
-impl ContinuousDOS for ChainDOS {
+impl ContinuousSF for ChainDOS {
     fn support(&self) -> (f64, f64) {
         self.edges.into()
     }
@@ -238,8 +238,8 @@ impl ContinuousDOS for ChainDOS {
 ///     A(\omega) = \frac{1}{\pi} \frac{1}{\sqrt{(2t)^2 - (\omega-\epsilon)^2}}
 ///         \theta((2t)^2 - (\omega-\epsilon)^2).
 /// $$
-pub fn chain(eps: f64, t: f64) -> DensityOfStates {
-    DensityOfStates::from_continuous(ChainDOS::new(eps, t))
+pub fn chain(eps: f64, t: f64) -> SpectralFunction {
+    SpectralFunction::from_continuous(ChainDOS::new(eps, t))
 }
 
 //
@@ -273,7 +273,7 @@ impl SquareDOS {
         }
     }
 }
-impl ContinuousDOS for SquareDOS {
+impl ContinuousSF for SquareDOS {
     fn support(&self) -> (f64, f64) {
         self.edges.into()
     }
@@ -312,16 +312,16 @@ impl ContinuousDOS for SquareDOS {
 ///         \theta((4t)^2 - (\omega-\epsilon)^2),
 /// $$
 /// where $K(m)$ is the complete elliptic integral of the first kind.
-pub fn square(eps: f64, t: f64) -> DensityOfStates {
-    DensityOfStates::from_continuous(SquareDOS::new(eps, t))
+pub fn square(eps: f64, t: f64) -> SpectralFunction {
+    SpectralFunction::from_continuous(SquareDOS::new(eps, t))
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::{DensityOfStates, models};
+    use crate::{SpectralFunction, models};
     use approx::assert_relative_eq;
 
-    fn compute_moment(dos: &DensityOfStates, order: i32) -> f64 {
+    fn compute_moment(dos: &SpectralFunction, order: i32) -> f64 {
         dos.integrate(|omega| omega.powi(order), None).unwrap()
     }
 
@@ -430,7 +430,7 @@ mod tests {
 
     #[test]
     fn square_regular_near_singularity() {
-        use crate::ContinuousDOS;
+        use crate::ContinuousSF;
         use crate::models::SquareDOS;
 
         let (eps, t) = (0.5f64, 2.0f64);

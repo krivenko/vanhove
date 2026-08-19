@@ -8,7 +8,7 @@ Model densities of states with integrable van Hove singularities, and accurate
 integration of spectral functions.
 
 Many quantities in condensed matter physics are spectral integrals
-$\int A(\omega) f(\omega) d\omega$ of a density of states $A(\omega)$ against
+$\int A(\omega) f(\omega) d\omega$ of a spectral function $A(\omega)$ against
 some function $f(\omega)$. Doing this numerically is awkward whenever
 $A(\omega)$ has van Hove singularities: they defeat generic adaptive quadrature
 even though the integrals themselves converge.
@@ -56,7 +56,7 @@ use vanhove::models::{discrete, semicircle, square};
 
 // 80% square-lattice band plus 20% of a single discrete level at ω = 3
 let dos = 0.8 * square(0.0, 1.0) + 0.2 * discrete(&[3.0], &[1.0]);
-assert_eq!(dos.norm(), 1.0);
+assert_eq!(dos.total_weight(), 1.0);
 
 // First spectral moment ∫A(ω) ω dω
 let m1 = dos.integrate(|omega| omega, None).unwrap();
