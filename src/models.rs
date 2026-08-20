@@ -2,7 +2,7 @@
 
 use crate::discrete::Resonance;
 use crate::util::fermi;
-use crate::{ContinuousSF, SpectralFunction};
+use crate::{ContinuousSF, SingularLaw, Singularity, SpectralFunction};
 
 use special::Elliptic;
 use std::f64::consts::PI;
@@ -119,7 +119,8 @@ struct SemicircleDOS {
     radius: f64,
     /// Band edges. For this model they double as the positions of the two
     /// square-root singularities, which sit exactly at the edges of the support.
-    edges: [f64; 2],
+    /// $S_p$ vanishes at either edge, so neither law is divergent.
+    edges: [Singularity; 2],
     prefactor: f64,
 }
 impl SemicircleDOS {
@@ -128,17 +129,26 @@ impl SemicircleDOS {
         SemicircleDOS {
             eps,
             radius,
-            edges: [eps - radius, eps + radius],
+            edges: [
+                Singularity {
+                    position: eps - radius,
+                    law: SingularLaw::Finite,
+                },
+                Singularity {
+                    position: eps + radius,
+                    law: SingularLaw::Finite,
+                },
+            ],
             prefactor: 2.0 / (PI * radius),
         }
     }
 }
 impl ContinuousSF for SemicircleDOS {
     fn support(&self) -> (f64, f64) {
-        self.edges.into()
+        (self.edges[0].position, self.edges[1].position)
     }
     fn regular(&self, omega: f64) -> f64 {
-        if omega == self.edges[0] || omega == self.edges[1] {
+        if omega == self.edges[0].position || omega == self.edges[1].position {
             -2.0 * self.prefactor
         } else {
             let x = (omega - self.eps) / self.radius;
@@ -146,7 +156,7 @@ impl ContinuousSF for SemicircleDOS {
                 * ((1.0 - x * x).sqrt() - (2.0 * (1.0 - x)).sqrt() - (2.0 * (1.0 + x)).sqrt())
         }
     }
-    fn singularities(&self) -> &[f64] {
+    fn singularities(&self) -> &[Singularity] {
         &self.edges
     }
     fn asymptotics(&self, p: usize, omega: f64) -> f64 {
@@ -180,26 +190,40 @@ struct ChainDOS {
     t: f64,
     /// Band edges. For this model they double as the positions of the two
     /// square-root singularities, which sit exactly at the edges of the support.
-    edges: [f64; 2],
+    edges: [Singularity; 2],
     prefactor: f64,
 }
 impl ChainDOS {
     fn new(eps: f64, t: f64) -> ChainDOS {
         assert!(t > 0.0, "hopping constant must be positive");
+        let law = SingularLaw::Power {
+            a: 0.5,
+            c: 1.0 / (2.0 * PI * t.sqrt()),
+            l: 0.0,
+        };
         ChainDOS {
             eps,
             t,
-            edges: [eps - 2.0 * t, eps + 2.0 * t],
+            edges: [
+                Singularity {
+                    position: eps - 2.0 * t,
+                    law,
+                },
+                Singularity {
+                    position: eps + 2.0 * t,
+                    law,
+                },
+            ],
             prefactor: 1.0 / (2.0 * PI * t),
         }
     }
 }
 impl ContinuousSF for ChainDOS {
     fn support(&self) -> (f64, f64) {
-        self.edges.into()
+        (self.edges[0].position, self.edges[1].position)
     }
     fn regular(&self, omega: f64) -> f64 {
-        if omega == self.edges[0] || omega == self.edges[1] {
+        if omega == self.edges[0].position || omega == self.edges[1].position {
             -0.75 * self.prefactor
         } else {
             let x = (omega - self.eps) / (2.0 * self.t);
@@ -215,7 +239,7 @@ impl ContinuousSF for ChainDOS {
             self.prefactor / (1.0 - x * x).sqrt() - sp - sm
         }
     }
-    fn singularities(&self) -> &[f64] {
+    fn singularities(&self) -> &[Singularity] {
         &self.edges
     }
     fn asymptotics(&self, p: usize, omega: f64) -> f64 {
@@ -258,18 +282,25 @@ struct SquareDOS {
     /// Band edges
     edges: [f64; 2],
     /// Position of the logarithmic van Hove singularity, which sits at the band center.
-    singularity: [f64; 1],
+    singularity: [Singularity; 1],
     prefactor: f64,
 }
 impl SquareDOS {
     fn new(eps: f64, t: f64) -> SquareDOS {
         assert!(t > 0.0, "hopping constant must be positive");
+        let prefactor = 1.0 / (2.0 * PI.powi(2) * t);
         SquareDOS {
             eps,
             t,
             edges: [eps - 4.0 * t, eps + 4.0 * t],
-            singularity: [eps],
-            prefactor: 1.0 / (2.0 * PI.powi(2) * t),
+            singularity: [Singularity {
+                position: eps,
+                law: SingularLaw::Log {
+                    c: prefactor,
+                    l: prefactor * (16.0 * t).ln(),
+                },
+            }],
+            prefactor,
         }
     }
 }
@@ -292,7 +323,7 @@ impl ContinuousSF for SquareDOS {
             self.prefactor * ((1.0 - ax * ax).elliptic_k() + (0.25 * ax).ln())
         }
     }
-    fn singularities(&self) -> &[f64] {
+    fn singularities(&self) -> &[Singularity] {
         &self.singularity
     }
     fn asymptotics(&self, p: usize, omega: f64) -> f64 {

@@ -15,6 +15,28 @@ use crate::discrete::DiscreteSF;
 // ContinuousSF
 //
 
+/// Leading behaviour of $S_p(\omega)$ as $\omega \to \Omega_p$.
+///
+/// `l` is the limit of $S_p(\omega)$ with the divergent term subtracted.
+#[derive(Debug, Clone, Copy)]
+enum SingularLaw {
+    /// $S_p(\Omega_p)$ is finite, hence given by `asymptotics()` itself
+    Finite,
+    /// $S_p(\omega) = c|\omega - \Omega_p|^{-a} + l + o(1)$, $a > 0$
+    Power { a: f64, c: f64, l: f64 },
+    /// $S_p(\omega) = -c\ln|\omega - \Omega_p| + l + o(1)$
+    Log { c: f64, l: f64 },
+}
+
+/// Isolated integrable singularity of a continuous spectral function.
+#[derive(Debug, Clone, Copy)]
+struct Singularity {
+    /// Position of the singular point, $\Omega_p$
+    position: f64,
+    /// Leading behaviour of $S_p(\omega)$ as $\omega \to \Omega_p$
+    law: SingularLaw,
+}
+
 /// Continuous spectral function possibly containing integrable singularities.
 /// It has the form $A(\omega) = R(\omega) + \sum_p S_p(\omega)$ for
 /// $\omega \in [\omega_{min}, \omega_{max}]$ and zero otherwise.
@@ -29,8 +51,8 @@ trait ContinuousSF {
     fn support(&self) -> (f64, f64);
     /// Regular part, $R(\omega)$
     fn regular(&self, omega: f64) -> f64;
-    /// Positions of the singular points, $\Omega_p$
-    fn singularities(&self) -> &[f64] {
+    /// Singular points $\Omega_p$ along with the leading behaviour of $S_p$ at each
+    fn singularities(&self) -> &[Singularity] {
         &[]
     }
     /// Asymptotic form near the p-th singular point, $S_p(\omega)$
@@ -138,6 +160,69 @@ impl SpectralFunction {
         self.discrete.total_weight() + self.continuous.iter().map(|(_, w)| w).sum::<f64>()
     }
 
+    /// Value of the continuous part of the spectral function at a frequency `omega`.
+    /// Returns $\pm\infty$ where the spectral function diverges, and zero outside of
+    /// the support of every continuous contribution.
+    ///
+    /// The discrete resonances are left out, a $\delta$-function having no value at a
+    /// point. Use [`SpectralFunction::discrete()`] to inspect them.
+    pub fn continuous_at(&self, omega: f64) -> f64 {
+        // Divergent laws encountered at omega, grouped by rank: (rank, ∑ w c, ∑ |w c|).
+        // The rank orders the laws by strength, a power law |ω-Ω_p|^{-a} being stronger
+        // than a logarithm for any a > 0.
+        let mut divergent: Vec<(f64, f64, f64)> = Vec::new();
+        // Everything that stays finite at omega
+        let mut finite = 0.0f64;
+
+        for (csf, w) in &self.continuous {
+            let (omega_min, omega_max) = csf.support();
+            // R(ω) is not defined outside of the support
+            if omega < omega_min || omega > omega_max {
+                continue;
+            }
+
+            let mut value = csf.regular(omega);
+            for (p, sing) in csf.singularities().iter().enumerate() {
+                // Away from Ω_p the asymptotics is finite and needs no analysis
+                if sing.position != omega {
+                    value += csf.asymptotics(p, omega);
+                    continue;
+                }
+                let (rank, c, l) = match sing.law {
+                    SingularLaw::Finite => {
+                        value += csf.asymptotics(p, omega);
+                        continue;
+                    }
+                    SingularLaw::Power { a, c, l } => (a, c, l),
+                    SingularLaw::Log { c, l } => (0.0, c, l),
+                };
+                // Both c|ω-Ω_p|^{-a} and -c ln|ω-Ω_p| diverge towards sign(c) ∞
+                let coeff = w * c;
+                match divergent.iter_mut().find(|(r, _, _)| *r == rank) {
+                    Some((_, sum, magnitude)) => {
+                        *sum += coeff;
+                        *magnitude += coeff.abs();
+                    }
+                    None => divergent.push((rank, coeff, coeff.abs())),
+                }
+                value += l;
+            }
+            finite += w * value;
+        }
+
+        // The strongest rank whose coefficients do not cancel fixes the value. The same
+        // relative tolerance decides a cancellation here as for the discrete weights.
+        match divergent
+            .iter()
+            .filter(|(_, sum, magnitude)| sum.abs() > DiscreteSF::WEIGHT_TOL * magnitude)
+            .max_by(|x, y| x.0.total_cmp(&y.0))
+        {
+            Some((_, sum, _)) => sum.signum() * f64::INFINITY,
+            // Every divergence has cancelled, leaving the l terms behind
+            None => finite,
+        }
+    }
+
     //
     // Spectral function integration
     //
@@ -173,8 +258,9 @@ impl SpectralFunction {
             .value;
 
             // Add integrals of the asymptotics
-            for (p, &omega_p) in csf.singularities().iter().enumerate() {
+            for (p, sing) in csf.singularities().iter().enumerate() {
                 // ∫S_p(ω)[f(ω) - f(Ω_p)]dω
+                let omega_p = sing.position;
                 let f_p = f(omega_p);
                 res_contrib += util::bilby_integrate(
                     |omega| {
@@ -237,7 +323,7 @@ impl SpectralFunction {
 
 #[cfg(test)]
 mod tests {
-    use crate::models::{chain, discrete, gaussian, square};
+    use crate::models::{chain, discrete, gaussian, semicircle, square};
     use approx::assert_relative_eq;
     use std::f64::consts::PI;
 
@@ -284,6 +370,54 @@ mod tests {
         // An unbounded contribution makes the whole support unbounded
         let dos = discrete(&[-0.7], &[0.5]) + gaussian(1.4, 0.5);
         assert_eq!(dos.support(), Some((f64::NEG_INFINITY, f64::INFINITY)));
+    }
+
+    #[test]
+    fn continuous_at() {
+        // Away from the singularities the value is that of A(ω) itself
+        let (eps, t) = (0.5f64, 1.0f64);
+        let dos = chain(eps, t);
+        for omega in [-1.0, 0.0, 0.8, 2.0] {
+            let ref_value = 1.0 / (PI * ((2.0 * t).powi(2) - (omega - eps).powi(2)).sqrt());
+            assert_relative_eq!(dos.continuous_at(omega), ref_value, max_relative = 1e-12);
+        }
+
+        // Outside of the support of every contribution
+        assert_eq!(dos.continuous_at(10.0), 0.0);
+
+        // Divergent singular points
+        assert_eq!(dos.continuous_at(eps - 2.0 * t), f64::INFINITY);
+        assert_eq!(dos.continuous_at(eps + 2.0 * t), f64::INFINITY);
+        assert_eq!(square(eps, t).continuous_at(eps), f64::INFINITY);
+        assert_eq!(
+            (-1.0 * square(eps, t)).continuous_at(eps),
+            f64::NEG_INFINITY
+        );
+
+        // A square-root band edge is a singular point where A(ω) stays finite
+        assert_eq!(semicircle(eps, 2.0).continuous_at(eps - 2.0), 0.0);
+
+        // Discrete resonances contribute nothing
+        assert_eq!(discrete(&[-0.7, 1.2], &[0.25, 0.6]).continuous_at(1.2), 0.0);
+    }
+
+    #[test]
+    fn continuous_at_cancelling_divergences() {
+        // Two logarithmic singularities meet at ω = 0, and the weights are chosen to
+        // cancel their coefficients c = 1/(2π^2 t) exactly. What is left of A(ω) there is
+        // the difference of the scales the two logarithms are written with,
+        // ln(16t_1)/(2π^2 t_1) - 2ln(16t_2)/(2π^2 t_2) = -ln(2)/(2π^2).
+        let dos = square(0.0, 1.0) + (-2.0) * square(0.0, 2.0);
+        assert_relative_eq!(
+            dos.continuous_at(0.0),
+            -2f64.ln() / (2.0 * PI.powi(2)),
+            max_relative = 1e-12
+        );
+
+        // A power law outranks a logarithm: the chain band edge wins over the
+        // logarithmic peak of the square lattice, both sitting at ω = 0.
+        let dos = square(0.0, 1.0) + (-1.0) * chain(2.0, 1.0);
+        assert_eq!(dos.continuous_at(0.0), f64::NEG_INFINITY);
     }
 
     #[test]
