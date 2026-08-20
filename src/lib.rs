@@ -115,6 +115,11 @@ impl SpectralFunction {
         SpectralFunction::from_discrete_continuous(DiscreteSF::new(), vec![(Rc::new(csf), 1.0)])
     }
 
+    /// Discrete part of the spectral function.
+    pub fn discrete(&self) -> &DiscreteSF {
+        &self.discrete
+    }
+
     /// Support of the spectral function, i.e. the smallest segment
     /// $[\omega_{min}, \omega_{max}]$ containing the supports of all its
     /// contributions. The segment is not necessarily tight: the spectral function
@@ -240,6 +245,19 @@ mod tests {
     fn total_weight() {
         let dos = 2.0 * discrete(&[-0.7, 1.2], &[0.25, 0.6]) + 5.0 * gaussian(1.4, 0.5);
         assert_relative_eq!(dos.total_weight(), 6.7, epsilon = 1e-12);
+    }
+
+    #[test]
+    fn discrete_part() {
+        let dos = 2.0 * discrete(&[-0.7, 1.2], &[0.25, 0.6]) + 5.0 * gaussian(1.4, 0.5);
+        let d = dos.discrete();
+        assert_eq!(d.len(), 2);
+        assert_relative_eq!(d.total_weight(), 1.7, epsilon = 1e-12);
+        assert_relative_eq!(d.find(1.2).unwrap().weight, 1.2, epsilon = 1e-12);
+
+        // Continuous contributions leave no trace in the discrete part
+        assert!(d.find(1.4).is_none());
+        assert!(gaussian(1.4, 0.5).discrete().is_empty());
     }
 
     #[test]
