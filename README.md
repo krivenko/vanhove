@@ -33,7 +33,7 @@ The numerical work is delegated to the
 | Function                    | Density of states                                            |
 | --------------------------- | ------------------------------------------------------------ |
 | `discrete(levels, weights)` | discrete levels, $\sum_p w_p \delta(\omega - \varepsilon_p)$ |
-| `flat(eps, d, nu)`          | flat band with smooth Fermi-like edges                       |
+| `flat(eps, d, delta)`       | flat band with Fermi-like edges, sharp for `delta = 0`        |
 | `gaussian(eps, sigma)`      | Gaussian                                                     |
 | `semicircle(eps, r)`        | semicircle (Wigner), square-root band edges                  |
 | `chain(eps, t)`             | linear chain, square-root divergent edges                    |

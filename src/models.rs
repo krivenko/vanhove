@@ -28,47 +28,64 @@ pub fn discrete(levels: &[f64], weights: &[f64]) -> SpectralFunction {
 }
 
 //
-// Flat DOS
+// (Soft-edged) flat DOS
 //
 
 struct FlatDOS {
     eps: f64,
     d: f64,
-    nu: f64,
+    delta: f64,
     prefactor: f64,
 }
 impl FlatDOS {
-    fn new(eps: f64, d: f64, nu: f64) -> FlatDOS {
+    fn new(eps: f64, d: f64, delta: f64) -> FlatDOS {
         assert!(d > 0.0, "bandwidth must be positive");
-        assert!(nu > 0.0, "inverse edge width must be positive");
-        let x = (nu * d).tanh();
+        assert!(delta >= 0.0, "edge width must be non-negative");
         FlatDOS {
             eps,
             d,
-            nu,
-            prefactor: x / (d * (1.0 + x)),
+            delta,
+            prefactor: if delta == 0.0 {
+                1.0 / (2.0 * d)
+            } else {
+                let x = (d / delta).tanh();
+                x / (d * (1.0 + x))
+            },
         }
     }
 }
 impl ContinuousSF for FlatDOS {
     fn support(&self) -> (f64, f64) {
-        (f64::NEG_INFINITY, f64::INFINITY)
+        if self.delta == 0.0 {
+            (self.eps - self.d, self.eps + self.d)
+        } else {
+            (f64::NEG_INFINITY, f64::INFINITY)
+        }
     }
     fn regular(&self, omega: f64) -> f64 {
-        self.prefactor
-            * fermi(self.nu * (omega - self.eps - self.d))
-            * fermi(-self.nu * (omega - self.eps + self.d))
+        if self.delta == 0.0 {
+            self.prefactor
+        } else {
+            self.prefactor
+                * fermi((omega - self.eps - self.d) / self.delta)
+                * fermi(-(omega - self.eps + self.d) / self.delta)
+        }
     }
 }
 
 /// Returns the normalized flat density of states centered at `eps` with half-bandwidth `d`,
-/// and smooth, Fermi-like band edges of inverse width `nu`,
+/// and smooth, Fermi-like band edges of width `delta`,
 /// $$
-///     A(\omega) = \frac{1}{d(1 + \coth(\nu d))}
-///         \frac{1}{(e^{\nu(\omega-\epsilon-d)}+1)(e^{-\nu(\omega-\epsilon+d)}+1)}.
+///     A(\omega) = \frac{1}{d(1 + \coth(d / \delta))}
+///         \frac{1}{(e^{(\omega-\epsilon-d)/\delta}+1)(e^{-(\omega-\epsilon+d)/\delta}+1)}.
 /// $$
-pub fn flat(eps: f64, d: f64, nu: f64) -> SpectralFunction {
-    SpectralFunction::from_continuous(FlatDOS::new(eps, d, nu))
+/// $\delta=0$ is a valid value that turns the edges into sharp discontinuous jumps,
+/// $$
+///     A(\omega) = \frac{1}{2d}\theta(d - |\omega-\epsilon|),
+/// $$
+/// the jump points $\omega = \epsilon \pm d$ evaluating to $1/(2d)$.
+pub fn flat(eps: f64, d: f64, delta: f64) -> SpectralFunction {
+    SpectralFunction::from_continuous(FlatDOS::new(eps, d, delta))
 }
 
 //
@@ -388,20 +405,38 @@ mod tests {
     fn flat() {
         let eps = 0.5f64;
         let d = 2.0f64;
-        let nu = 5.0f64;
+        let delta = 0.2f64;
 
         use std::f64::consts::PI;
-        let a = nu * d;
+        let a = d / delta;
         let mu2 = d.powi(2) * (PI.powi(2) + a.powi(2)) / (3.0 * a.powi(2));
-        let mu4 = mu2 * (3.0 * a.powi(2) + 7.0 * PI.powi(2)) / (5.0 * nu.powi(2));
+        let mu4 = mu2 * (3.0 * a.powi(2) + 7.0 * PI.powi(2)) * delta.powi(2) / 5.0;
         let mu6 = (3.0 * a.powi(6)
             + 21.0 * a.powi(4) * PI.powi(2)
             + 49.0 * a.powi(2) * PI.powi(4)
             + 31.0 * PI.powi(6))
-            / (21.0 * nu.powi(6));
+            * delta.powi(6)
+            / 21.0;
         let moments_ref = central_to_moments(eps, mu2, mu4, mu6);
 
-        let dos = models::flat(eps, d, nu);
+        let dos = models::flat(eps, d, delta);
+        for (order, moment_ref) in moments_ref.iter().enumerate() {
+            let moment = compute_moment(&dos, order as i32);
+            assert_relative_eq!(moment, moment_ref, max_relative = 1e-10);
+        }
+    }
+
+    #[test]
+    fn flat_sharp() {
+        let eps = 0.5f64;
+        let d = 2.0f64;
+
+        // δ -> 0 limits of the central moments used in flat()
+        let moments_ref =
+            central_to_moments(eps, d.powi(2) / 3.0, d.powi(4) / 5.0, d.powi(6) / 7.0);
+
+        let dos = models::flat(eps, d, 0.0);
+        assert_eq!(dos.support(), Some((eps - d, eps + d)));
         for (order, moment_ref) in moments_ref.iter().enumerate() {
             let moment = compute_moment(&dos, order as i32);
             assert_relative_eq!(moment, moment_ref, max_relative = 1e-10);
