@@ -251,7 +251,7 @@ impl ContinuousSF for PseudogapDOS {
 /// Returns the normalized density of states with a pseudogap located at `eps` with
 /// power-law asymptotics characterized by the positive exponent `r`,
 /// $$
-///     A(\omega) = |\omega - \epsilon|^r
+///     A(\omega) = \frac{1+r}{2 d^{1+r}} |\omega - \epsilon|^r
 ///         \theta(d^2 - (\omega-\epsilon)^2).
 /// $$
 /// and the half-bandwidth `d`.
