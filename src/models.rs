@@ -336,7 +336,8 @@ impl ContinuousSF for ChainDOS {
 }
 
 /// Returns the normalized density of states of a linear chain with the hopping constant `t`
-/// and the local energy level `eps`,
+/// and the local energy level `eps` (derived from the dispersion law
+/// $\varepsilon(k) = \epsilon - 2t\cos(k)$),
 /// $$
 ///     A(\omega) = \frac{1}{\pi} \frac{1}{\sqrt{(2t)^2 - (\omega-\epsilon)^2}}
 ///         \theta((2t)^2 - (\omega-\epsilon)^2).
@@ -416,7 +417,8 @@ impl ContinuousSF for SquareDOS {
 }
 
 /// Returns the normalized density of states of a square lattice with the hopping constant
-/// `t` and the local energy level `eps`,
+/// `t` and the local energy level `eps` (derived from the dispersion law
+/// $\varepsilon(k) = \epsilon - 2t[\cos(k_x) + \cos(k_y)]$),
 /// $$
 ///     A(\omega) = \frac{1}{2\pi^2 t} K\left(1 - \left(\frac{\omega-\epsilon}{4t}\right)^2\right)
 ///         \theta((4t)^2 - (\omega-\epsilon)^2),
@@ -511,7 +513,8 @@ impl ContinuousSF for TriangularDOS {
 }
 
 /// Returns the normalized density of states of a triangular lattice with the hopping constant
-/// `t` and the local energy level `eps`,
+/// `t` and the local energy level `eps` (derived from the dispersion law
+/// $\varepsilon(k) = \epsilon - 2t[\cos(k_x) + 2\cos(k_x/2)\cos(\sqrt{3} k_y/2)]$),
 /// $$
 ///     A(\omega) = \frac{1}{\pi^2|t|\sqrt{z_0(\omega-\epsilon)}}
 ///         K\left(\frac{z_1(\omega-\epsilon)}{z_0(\omega-\epsilon)}\right)
