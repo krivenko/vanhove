@@ -538,6 +538,130 @@ pub fn triangular(eps: f64, t: f64) -> SpectralFunction {
     SpectralFunction::from_continuous(TriangularDOS::new(eps, t))
 }
 
+//
+// Honeycomb lattice DOS
+//
+
+/// Value of $|t^2-(\omega-\epsilon)^2|/(8t^2)$ below which the regular part of the honeycomb
+/// lattice DOS is evaluated using a series expansion. At the threshold both expressions
+/// agree to within a relative error of $10^{-8}$.
+const HONEYCOMB_DOS_SERIES_THRESHOLD: f64 = 1e-3;
+
+/// Density of states of a honeycomb lattice.
+///
+/// The two bands $\pm t|f(k)|$ share the single-band dispersion of the triangular lattice
+/// via $|f(k)|^2 = 3 - x(k)$, $x$ being the triangular lattice energy measured from
+/// $\epsilon$ in units of $t$. The DOS is, therefore, that of the triangular lattice at
+/// $x = 3 - ((\omega-\epsilon)/t)^2$, reweighted by the Jacobian $|\omega-\epsilon|/t$ of
+/// that substitution.
+struct HoneycombDOS {
+    eps: f64,
+    t: f64,
+    /// Band edges
+    edges: [f64; 2],
+    /// Positions of the logarithmic van Hove singularities.
+    singularities: [Singularity; 2],
+    prefactor: f64,
+}
+impl HoneycombDOS {
+    fn new(eps: f64, t: f64) -> HoneycombDOS {
+        assert!(t > 0.0, "hopping constant must be positive");
+        let prefactor = 1.0 / (PI.powi(2) * t);
+        HoneycombDOS {
+            eps,
+            t,
+            edges: [eps - 3.0 * t, eps + 3.0 * t],
+            singularities: [
+                Singularity {
+                    position: eps - t,
+                    law: SingularLaw::Log {
+                        c: prefactor * 0.75,
+                        l: prefactor * 0.75 * (4.0 * t).ln(),
+                    },
+                },
+                Singularity {
+                    position: eps + t,
+                    law: SingularLaw::Log {
+                        c: prefactor * 0.75,
+                        l: prefactor * 0.75 * (4.0 * t).ln(),
+                    },
+                },
+            ],
+            prefactor,
+        }
+    }
+}
+impl ContinuousSF for HoneycombDOS {
+    fn support(&self) -> (f64, f64) {
+        self.edges.into()
+    }
+    fn regular(&self, omega: f64) -> f64 {
+        let ax = ((omega - self.eps) / self.t).abs();
+        // Distance to the singular points in the expansion variable of the triangular
+        // lattice DOS, d = x - 2. The factored form is free of cancellation for ax ≈ 1.
+        let d = (1.0 - ax) * (1.0 + ax);
+        // Argument of the logarithm subtracted by the triangular lattice DOS
+        let y = 0.125 * d.abs();
+        if y == 0.0 {
+            -self.prefactor * 0.75 * std::f64::consts::LN_2
+        } else if y < HONEYCOMB_DOS_SERIES_THRESHOLD {
+            // Close to a singularity, K(z_1/z_0)/\sqrt{z_0} ≈ -0.75 ln(y) nearly cancels the
+            // logarithm, and evaluating the difference directly is catastrophically
+            // inaccurate. Worse, 1 - z_1/z_0 = O(d^3) drowns in the round-off of z_1/z_0 as
+            // d -> 0. Use the expansion of the triangular lattice regular part,
+            // d(3Λ/16 - 9/32) + d^2(15Λ/128 - 99/512) + d^3(21Λ/256 - 75/512)
+            // + O(d^4 ln d), where Λ = -ln(y), and pick up the leftover logarithm through
+            // ax - 1.
+            let l = -y.ln();
+            let s = d
+                * ((3.0 / 16.0) * l - 9.0 / 32.0
+                    + d * ((15.0 / 128.0) * l - 99.0 / 512.0
+                        + d * ((21.0 / 256.0) * l - 75.0 / 512.0)));
+            self.prefactor * (ax * s - 0.75 * (l * d / (1.0 + ax) + std::f64::consts::LN_2))
+        } else {
+            let a = 3.0 + 2.0 * ax - 0.25 * (3.0 - ax.powi(2)).powi(2);
+            let b = 4.0 * ax;
+            let (z0, z1) = if ax <= 1.0 { (a, b) } else { (b, a) };
+            self.prefactor * (ax * ((z1 / z0).elliptic_k() / z0.sqrt()) + 0.75 * (0.5 * y).ln())
+        }
+    }
+    fn singularities(&self) -> &[Singularity] {
+        &self.singularities
+    }
+    fn asymptotics(&self, p: usize, omega: f64) -> f64 {
+        debug_assert!(p <= 1);
+        let x = (omega - self.singularities[p].position) / (4.0 * self.t);
+        -self.prefactor * 0.75 * x.abs().ln()
+    }
+    fn asympt_int(&self, _p: usize) -> f64 {
+        (9.0 + 3.0 * std::f64::consts::LN_2) / (2.0 * PI.powi(2))
+    }
+}
+
+/// Returns the normalized density of states of a honeycomb lattice with the hopping constant
+/// `t` and the local energy level `eps` (derived from the two-band dispersion law
+/// $\varepsilon_\pm(k) = \epsilon \pm t\sqrt{3 + 2[\cos(k_x) + 2\cos(k_x/2)\cos(\sqrt{3}k_y/2)]}$),
+/// $$
+///     A(\omega) = \frac{|\omega-\epsilon|}{\pi^2 t^2\sqrt{z_0(\omega-\epsilon)}}
+///         K\left(\frac{z_1(\omega-\epsilon)}{z_0(\omega-\epsilon)}\right)
+///         \theta((3t)^2 - (\omega-\epsilon)^2),
+/// $$
+/// where $K(m)$ is the complete elliptic integral of the first kind and
+/// $$
+///     z_0(\nu) = \begin{cases}
+///         3 + 2\frac{|\nu|}{t} - \frac{1}{4}\left(3 - \frac{\nu^2}{t^2}\right)^2, & |\nu|/t \leq 1, \\\\
+///         4\frac{|\nu|}{t}, & |\nu|/t > 1,
+///     \end{cases}
+///     \qquad
+///     z_1(\nu) = \begin{cases}
+///         4\frac{|\nu|}{t}, & |\nu|/t \leq 1, \\\\
+///         3 + 2\frac{|\nu|}{t} - \frac{1}{4}\left(3 - \frac{\nu^2}{t^2}\right)^2, & |\nu|/t > 1.
+///     \end{cases}
+/// $$
+pub fn honeycomb(eps: f64, t: f64) -> SpectralFunction {
+    SpectralFunction::from_continuous(HoneycombDOS::new(eps, t))
+}
+
 #[cfg(test)]
 mod tests {
     use crate::{SpectralFunction, models};
@@ -748,7 +872,6 @@ mod tests {
         let eps = 0.5f64;
         // The band edges swap places with the sign of t, and μ_n of odd order do not vanish
         for t in [2.0f64, -0.7] {
-
             let moments_ref = central_to_moments(
                 eps,
                 [
@@ -794,7 +917,7 @@ mod tests {
 
         assert_eq!(dos.regular(eps + 2.0 * t), 0.0);
         for (e, ref_plus, ref_minus) in ref_values {
-            for (sign, ref_value) in [(1.0f64, ref_plus), (-1.0, ref_minus)] {
+            for (sign, ref_value) in [(1.0, ref_plus), (-1.0, ref_minus)] {
                 let d = sign * 2f64.powi(-e);
                 let omega = eps + (2.0 + d) * t;
                 assert_relative_eq!(
@@ -802,6 +925,75 @@ mod tests {
                     prefactor * ref_value,
                     max_relative = 1e-6
                 );
+            }
+        }
+    }
+
+    #[test]
+    fn honeycomb() {
+        let eps = 0.5f64;
+        let t = 2.0f64;
+        let moments_ref = central_to_moments(
+            eps,
+            even_central_moments(3.0 * t.powi(2), 15.0 * t.powi(4), 93.0 * t.powi(6)),
+        );
+
+        let dos = models::honeycomb(eps, t);
+        assert_eq!(dos.support(), Some((eps - 3.0 * t, eps + 3.0 * t)));
+
+        // Both van Hove singularities diverge, while the Dirac point between them is a
+        // zero of A(ω) that only the two logarithms cancelling leaves behind.
+        assert_eq!(dos.continuous_at(eps - t), f64::INFINITY);
+        assert_eq!(dos.continuous_at(eps + t), f64::INFINITY);
+        assert_relative_eq!(dos.continuous_at(eps), 0.0, epsilon = 1e-15);
+
+        for (order, moment_ref) in moments_ref.iter().enumerate() {
+            let moment = compute_moment(&dos, order as i32);
+            assert_relative_eq!(moment, moment_ref, max_relative = 1e-10);
+        }
+    }
+
+    #[test]
+    fn honeycomb_regular_near_singularity() {
+        use crate::ContinuousSF;
+        use crate::models::HoneycombDOS;
+
+        let (eps, t) = (0.5f64, 2.0f64);
+        let dos = HoneycombDOS::new(eps, t);
+        let prefactor = 1.0 / (std::f64::consts::PI.powi(2) * t);
+
+        // Unlike its triangular lattice counterpart, R(ω) does not vanish at the singular
+        // points: the two logarithms subtracted there differ in scale by a factor of 2.
+        for omega_p in [eps - t, eps + t] {
+            assert_relative_eq!(
+                dos.regular(omega_p),
+                -prefactor * 0.75 * std::f64::consts::LN_2,
+                max_relative = 1e-14
+            );
+        }
+
+        // R(ε \pm (1+δ)t) / prefactor at δ = \pm 2^-e, evaluated at 200 bits of precision.
+        // The series expansion takes over at |δ| < 4e-3.
+        let ref_values = [
+            (1, 0.0943101136887941, -1.29999066584090),
+            (4, -0.389118215772244, -0.654568957739481),
+            (7, -0.497232083057124, -0.542574386667219),
+            (10, -0.516265866766906, -0.523456614923520),
+            (20, -0.519854395427088, -0.519866375415643),
+        ];
+
+        for (e, ref_plus, ref_minus) in ref_values {
+            for (sign, ref_value) in [(1.0f64, ref_plus), (-1.0, ref_minus)] {
+                let delta = sign * 2f64.powi(-e);
+                // R(ω) is even about ε, both singularities being equivalent
+                for band in [-1.0f64, 1.0] {
+                    let omega = eps + band * (1.0 + delta) * t;
+                    assert_relative_eq!(
+                        dos.regular(omega),
+                        prefactor * ref_value,
+                        max_relative = 1e-8
+                    );
+                }
             }
         }
     }
