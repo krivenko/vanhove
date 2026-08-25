@@ -198,6 +198,79 @@ pub fn semicircle(eps: f64, r: f64) -> SpectralFunction {
 }
 
 //
+// Power-law band edge
+//
+
+/// Power-law threshold density of states
+struct PowerLawDOS {
+    eps: f64,
+    r: f64,
+    /// Band edges
+    edges: [f64; 2],
+    singularity: [Singularity; 1],
+    prefactor: f64,
+}
+impl PowerLawDOS {
+    fn new(eps: f64, r: f64, w: f64) -> PowerLawDOS {
+        assert!(r > -1.0, "asymptotics exponent must satisfy r > -1");
+        assert!(w > 0.0, "bandwidth must be positive");
+        let prefactor = (r + 1.0) / (w.powf(r + 1.0));
+        let sing_law = if r < 0.0 {
+            SingularLaw::Power {
+                a: -r,
+                c: prefactor,
+                l: 0.0,
+            }
+        } else {
+            SingularLaw::Finite
+        };
+        PowerLawDOS {
+            eps,
+            r,
+            edges: [eps, eps + w],
+            singularity: [Singularity {
+                position: eps,
+                law: sing_law,
+            }],
+            prefactor,
+        }
+    }
+    fn value(&self, omega: f64) -> f64 {
+        self.prefactor * (omega - self.eps).powf(self.r)
+    }
+}
+impl ContinuousSF for PowerLawDOS {
+    fn support(&self) -> (f64, f64) {
+        self.edges.into()
+    }
+    fn regular(&self, omega: f64) -> f64 {
+        if self.r < 1.0 { 0.0 } else { self.value(omega) }
+    }
+    fn singularities(&self) -> &[Singularity] {
+        &self.singularity
+    }
+    fn asymptotics(&self, p: usize, omega: f64) -> f64 {
+        debug_assert!(p == 0);
+        if self.r < 1.0 { self.value(omega) } else { 0.0 }
+    }
+    fn asympt_int(&self, _p: usize) -> f64 {
+        if self.r < 1.0 { 1.0 } else { 0.0 }
+    }
+}
+
+/// Returns the normalized density of states with a power-law band edge
+/// located at `eps`. The power-law asymptotics is characterized by
+/// the exponent `r > -1`,
+/// $$
+///     A(\omega) = \frac{r+1}{w^{r+1}} (\omega - \epsilon)^r
+///         \theta(\omega-\epsilon) \theta(w - (\omega-\epsilon)),
+/// $$
+/// and `w` is the bandwidth.
+pub fn powerlaw(eps: f64, r: f64, w: f64) -> SpectralFunction {
+    SpectralFunction::from_continuous(PowerLawDOS::new(eps, r, w))
+}
+
+//
 // Pseudogap DOS
 //
 
@@ -222,7 +295,7 @@ impl PseudogapDOS {
                 position: eps,
                 law: SingularLaw::Finite,
             }],
-            prefactor: (1.0 + r) / (2.0 * d.powf(1.0 + r)),
+            prefactor: (r + 1.0) / (2.0 * d.powf(r + 1.0)),
         }
     }
     fn value(&self, omega: f64) -> f64 {
@@ -784,6 +857,40 @@ mod tests {
         for (order, moment_ref) in moments_ref.iter().enumerate() {
             let moment = compute_moment(&dos, order as i32);
             assert_relative_eq!(moment, moment_ref, max_relative = 1e-10);
+        }
+    }
+
+    #[test]
+    fn powerlaw() {
+        let eps = 0.5f64;
+        let w = 2.0f64;
+
+        // r < 0 makes A(ω) diverge at the band edge, -1 < r < 1 puts the whole of it into
+        // the singular part, and r >= 1 into the regular one
+        for r in [-0.5f64, 0.0, 0.5, 1.0, 2.5] {
+            let dos = models::powerlaw(eps, r, w);
+            assert_eq!(dos.support(), Some((eps, eps + w)));
+
+            // A(ω) = (r+1)(ω-ε)^r / w^{r+1}
+            let a = |omega: f64| (r + 1.0) * (omega - eps).powf(r) / w.powf(r + 1.0);
+            for omega in [eps + 1e-3, eps + 0.7, eps + 1.3, eps + w] {
+                assert_relative_eq!(dos.continuous_at(omega), a(omega), max_relative = 1e-12);
+            }
+            // The band edge itself diverges for r < 0 only
+            assert_eq!(
+                dos.continuous_at(eps),
+                if r < 0.0 { f64::INFINITY } else { a(eps) }
+            );
+            assert_eq!(dos.continuous_at(eps - 0.5 * w), 0.0);
+            assert_eq!(dos.continuous_at(eps + 1.5 * w), 0.0);
+
+            // μ_n = (r+1)w^n/(n+r+1), including the odd orders as A(ω) is one-sided
+            let mu = |n: i32| (r + 1.0) * w.powi(n) / (f64::from(n) + r + 1.0);
+            let moments_ref = central_to_moments(eps, [mu(1), mu(2), mu(3), mu(4), mu(5), mu(6)]);
+            for (order, moment_ref) in moments_ref.iter().enumerate() {
+                let moment = compute_moment(&dos, order as i32);
+                assert_relative_eq!(moment, moment_ref, max_relative = 1e-10);
+            }
         }
     }
 
