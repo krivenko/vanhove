@@ -1,11 +1,12 @@
 //! Model densities of states commonly used in physics
 
-use crate::discrete::Resonance;
+use crate::discrete::{DiscreteSF, Resonance};
 use crate::util::fermi;
 use crate::{ContinuousSF, SingularLaw, Singularity, SpectralFunction};
 
 use special::Elliptic;
 use std::f64::consts::PI;
+use std::rc::Rc;
 
 //
 // Discrete DOS
@@ -598,8 +599,7 @@ impl ContinuousSF for TriangularDOS {
 ///     z_0(\nu) = \begin{cases}
 ///         3 + 2\sqrt{3 - \nu/t} - \frac{\nu^2}{4t^2}, & \nu/t \geq 2, \\\\
 ///         4\sqrt{3 - \nu/t}, & \nu/t < 2,
-///     \end{cases}
-///     \qquad
+///     \end{cases} \\\\
 ///     z_1(\nu) = \begin{cases}
 ///         4\sqrt{3 - \nu/t}, & \nu/t \geq 2, \\\\
 ///         3 + 2\sqrt{3 - \nu/t} - \frac{\nu^2}{4t^2}, & \nu/t < 2.
@@ -724,8 +724,7 @@ impl ContinuousSF for HoneycombDOS {
 ///     z_0(\nu) = \begin{cases}
 ///         3 + 2\frac{|\nu|}{t} - \frac{1}{4}\left(3 - \frac{\nu^2}{t^2}\right)^2, & |\nu|/t \leq 1, \\\\
 ///         4\frac{|\nu|}{t}, & |\nu|/t > 1,
-///     \end{cases}
-///     \qquad
+///     \end{cases} \\\\
 ///     z_1(\nu) = \begin{cases}
 ///         4\frac{|\nu|}{t}, & |\nu|/t \leq 1, \\\\
 ///         3 + 2\frac{|\nu|}{t} - \frac{1}{4}\left(3 - \frac{\nu^2}{t^2}\right)^2, & |\nu|/t > 1.
@@ -733,6 +732,42 @@ impl ContinuousSF for HoneycombDOS {
 /// $$
 pub fn honeycomb(eps: f64, t: f64) -> SpectralFunction {
     SpectralFunction::from_continuous(HoneycombDOS::new(eps, t))
+}
+
+//
+// Kagome lattice DOS
+//
+
+/// Returns the normalized density of states of the Kagome lattice with the hopping constant
+/// `t` and the local energy level `eps` (derived from the two-band dispersion law
+/// $\varepsilon_\pm(k) = \epsilon + t \left(1 \pm
+/// \sqrt{3 + 2[\cos(k_x) + 2\cos(k_x/2)\cos(\sqrt{3}k_y/2)]}\right)$,
+/// and a third flat band $\varepsilon_F(k) = \epsilon - 2t$),
+/// $$
+///     A(\omega) = \frac{1}{3}\delta(\omega-\epsilon+2t) +
+///         \frac{2}{3}\frac{|\omega-\epsilon-t|}{\pi^2 t^2\sqrt{z_0(\omega-\epsilon-t)}}
+///         K\left(\frac{z_1(\omega-\epsilon-t)}{z_0(\omega-\epsilon-t)}\right)
+///         \theta\left((3t)^2 - (\omega-\epsilon-t)^2\right),
+/// $$
+/// where $K(m)$ is the complete elliptic integral of the first kind and
+/// $$
+///     z_0(\nu) = \begin{cases}
+///         3 + 2\frac{|\nu|}{|t|} - \frac{1}{4}\left(3 - \frac{\nu^2}{t^2}\right)^2, & |\nu|/|t| \leq 1, \\\\
+///         4\frac{|\nu|}{|t|}, & |\nu|/|t| > 1,
+///     \end{cases} \\\\
+///     z_1(\nu) = \begin{cases}
+///         4\frac{|\nu|}{|t|}, & |\nu|/|t| \leq 1, \\\\
+///         3 + 2\frac{|\nu|}{|t|} - \frac{1}{4}\left(3 - \frac{\nu^2}{t^2}\right)^2, & |\nu|/|t| > 1.
+///     \end{cases}
+/// $$
+/// Positions of the band edges are $\omega_\mathrm{min} = \epsilon+\min(-2t, 4t)$,
+/// $\omega_\mathrm{max} = \epsilon+\max(-2t, 4t)$.
+pub fn kagome(eps: f64, t: f64) -> SpectralFunction {
+    assert!(t != 0.0, "hopping constant must be non-zero");
+    SpectralFunction::from_discrete_continuous(
+        DiscreteSF::one_resonance(eps - 2.0 * t, 1.0 / 3.0),
+        vec![(Rc::new(HoneycombDOS::new(eps + t, t.abs())), 2.0 / 3.0)],
+    )
 }
 
 #[cfg(test)]
@@ -1101,6 +1136,52 @@ mod tests {
                         max_relative = 1e-8
                     );
                 }
+            }
+        }
+    }
+
+    #[test]
+    fn kagome() {
+        let eps = 0.5f64;
+        // The flat band swaps the band edge it is degenerate with as t changes sign, and
+        // μ_n of odd order do not vanish.
+        for t in [2.0f64, -0.5] {
+            let moments_ref = central_to_moments(
+                eps,
+                [
+                    0.0,
+                    4.0 * t.powi(2),
+                    4.0 * t.powi(3),
+                    28.0 * t.powi(4),
+                    60.0 * t.powi(5),
+                    264.0 * t.powi(6),
+                ],
+            );
+
+            let dos = models::kagome(eps, t);
+            let omega_min = eps + (-2.0 * t).min(4.0 * t);
+            let omega_max = eps + (-2.0 * t).max(4.0 * t);
+            assert_eq!(dos.support(), Some((omega_min, omega_max)));
+            assert_relative_eq!(dos.total_weight(), 1.0, max_relative = 1e-14);
+
+            // The flat band is a δ-function of weight 1/3 at the edge it touches at k = 0
+            assert_eq!(dos.discrete().len(), 1);
+            assert_eq!(dos.discrete().resonances()[0].eps, eps - 2.0 * t);
+            assert_relative_eq!(
+                dos.discrete().resonances()[0].weight,
+                1.0 / 3.0,
+                max_relative = 1e-14
+            );
+
+            // The dispersive bands are the honeycomb ones shifted by t, so the van Hove
+            // singularities sit at ε and ε+2t with the Dirac point halfway between them
+            assert_eq!(dos.continuous_at(eps), f64::INFINITY);
+            assert_eq!(dos.continuous_at(eps + 2.0 * t), f64::INFINITY);
+            assert_relative_eq!(dos.continuous_at(eps + t), 0.0, epsilon = 1e-15);
+
+            for (order, moment_ref) in moments_ref.iter().enumerate() {
+                let moment = compute_moment(&dos, order as i32);
+                assert_relative_eq!(moment, moment_ref, max_relative = 1e-10);
             }
         }
     }
