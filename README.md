@@ -30,14 +30,20 @@ The numerical work is delegated to the
 
 ## Models
 
-| Function                    | Density of states                                            |
-| --------------------------- | ------------------------------------------------------------ |
-| `discrete(levels, weights)` | discrete levels, $\sum_p w_p \delta(\omega - \varepsilon_p)$ |
+| Function                    | Density of states                                             |
+| --------------------------- | ------------------------------------------------------------- |
+| `discrete(levels, weights)` | discrete levels, $\sum_p w_p \delta(\omega - \varepsilon_p)$  |
 | `flat(eps, d, delta)`       | flat band with Fermi-like edges, sharp for `delta = 0`        |
-| `gaussian(eps, sigma)`      | Gaussian                                                     |
-| `semicircle(eps, r)`        | semicircle (Wigner), square-root band edges                  |
-| `chain(eps, t)`             | linear chain, square-root divergent edges                    |
-| `square(eps, t)`            | square lattice, logarithmic van Hove peak                    |
+| `gaussian(eps, sigma)`      | Gaussian                                                      |
+| `semicircle(eps, r)`        | semicircle (Wigner), square-root band edges                   |
+| `powerlaw(eps, r, w)`       | one-sided power-law band edge, divergent for `r < 0`          |
+| `pseudogap(eps, r, d)`      | pseudogap, $\lvert\omega-\epsilon\rvert^r$ at the band center |
+| `chain(eps, t)`             | linear chain, square-root divergent edges                     |
+| `square(eps, t)`            | square lattice, logarithmic van Hove peak                     |
+| `triangular(eps, t)`        | triangular lattice, asymmetric with a logarithmic peak        |
+| `honeycomb(eps, t)`         | honeycomb lattice, two logarithmic peaks about a Dirac point  |
+| `kagome(eps, t)`            | Kagome lattice, flat band $\delta$-peak at a band edge        |
+| `lieb(eps, t)`              | Lieb lattice, flat band $\delta$-peak at the band center      |
 
 Every model is normalized to unit spectral weight. They can be scaled by real
 numbers and added together, so mixed discrete/continuous spectra are built by
