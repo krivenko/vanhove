@@ -5,7 +5,7 @@ use crate::util::fermi;
 use crate::{ContinuousSF, SingularLaw, Singularity, SpectralFunction};
 
 use special::Elliptic;
-use std::f64::consts::PI;
+use std::f64::consts::{PI, SQRT_2};
 use std::rc::Rc;
 
 //
@@ -770,6 +770,120 @@ pub fn kagome(eps: f64, t: f64) -> SpectralFunction {
     )
 }
 
+//
+// Lieb lattice DOS
+//
+
+/// Value of $|((\omega-\epsilon)/(2t))^2 - 1|$ below which the regular part of the Lieb
+/// lattice DOS is evaluated using a series expansion. At the threshold both expressions
+/// agree to within a relative error of $10^{-12}$.
+const LIEB_DOS_SERIES_THRESHOLD: f64 = 1e-3;
+
+/// Density of states of the Lieb lattice.
+///
+/// The two dispersive bands $\pm 2t\sqrt{\cos(k_x)^2 + \cos(k_y)^2}$ share the dispersion
+/// of the square lattice via $u^2 - 1 = [\cos(2k_x) + \cos(2k_y)]/2$, $u$ being the energy
+/// measured from $\epsilon$ in units of $2t$. The DOS is, therefore, that of the square
+/// lattice at $x = u^2 - 1$, reweighted by $|u|$, half the Jacobian of that substitution,
+/// the other half splitting the weight between the two bands.
+struct LiebDOS {
+    eps: f64,
+    t: f64,
+    /// Band edges
+    edges: [f64; 2],
+    /// Positions of the logarithmic van Hove singularities.
+    singularities: [Singularity; 2],
+    prefactor: f64,
+}
+impl LiebDOS {
+    fn new(eps: f64, t: f64) -> LiebDOS {
+        assert!(t > 0.0, "hopping constant must be positive");
+        let prefactor = 1.0 / (PI.powi(2) * t);
+        let half_width = 2.0 * SQRT_2 * t;
+        LiebDOS {
+            eps,
+            t,
+            edges: [eps - half_width, eps + half_width],
+            singularities: [
+                Singularity {
+                    position: eps - 2.0 * t,
+                    law: SingularLaw::Log {
+                        c: prefactor,
+                        l: prefactor * (2.0 * t).ln(),
+                    },
+                },
+                Singularity {
+                    position: eps + 2.0 * t,
+                    law: SingularLaw::Log {
+                        c: prefactor,
+                        l: prefactor * (2.0 * t).ln(),
+                    },
+                },
+            ],
+            prefactor,
+        }
+    }
+}
+impl ContinuousSF for LiebDOS {
+    fn support(&self) -> (f64, f64) {
+        self.edges.into()
+    }
+    fn regular(&self, omega: f64) -> f64 {
+        let ax = ((omega - self.eps) / (2.0 * self.t)).abs();
+        // Square lattice energy variable, which vanishes at the singular points. The
+        // factored form is free of cancellation for ax ≈ 1.
+        let y = (ax - 1.0) * (ax + 1.0);
+        if y == 0.0 {
+            2.0 * self.prefactor * std::f64::consts::LN_2
+        } else if y.abs() < LIEB_DOS_SERIES_THRESHOLD {
+            // 1 - y^2 rounds to unity for small y, making elliptic_k() overflow. Expand it
+            // instead as K(1-y^2) = Λ + (y^2/4)(Λ-1) + O(y^4 ln y), where Λ = ln(4/|y|),
+            // and pick up the leftover logarithm through ax - 1 = y/(1+ax).
+            let l = (4.0 / y.abs()).ln();
+            self.prefactor
+                * ((y / (1.0 + ax)) * l
+                    + 2.0 * std::f64::consts::LN_2
+                    + 0.25 * ax * y.powi(2) * (l - 1.0))
+        } else {
+            self.prefactor * (ax * (1.0 - y.powi(2)).elliptic_k() + y.abs().ln())
+        }
+    }
+    fn singularities(&self) -> &[Singularity] {
+        &self.singularities
+    }
+    fn asymptotics(&self, p: usize, omega: f64) -> f64 {
+        debug_assert!(p <= 1);
+        let x = (omega - self.singularities[p].position) / (2.0 * self.t);
+        -self.prefactor * x.abs().ln()
+    }
+    fn asympt_int(&self, _p: usize) -> f64 {
+        4.0 * (SQRT_2 - (1.0 + SQRT_2).ln()) / PI.powi(2)
+    }
+}
+
+/// Returns the normalized density of states of the Lieb lattice with the hopping constant
+/// `t` and the local energy level `eps` (derived from the two-band dispersion law
+/// $\varepsilon_\pm(k) = \epsilon \pm 2t\sqrt{\cos(k_x)^2 + \cos(k_y)^2}$
+/// and a third flat band $\varepsilon_F(k) = \epsilon$),
+/// $$
+///     A(\omega) = \frac{1}{3} \delta(\omega-\epsilon) +
+///         \frac{|\omega-\epsilon|}{3\pi^2 t^2}
+///         K\left(1 - \left(\left(\frac{\omega-\epsilon}{2t}\right)^2 - 1\right)^2\right)
+///         \theta\left(8t^2 - (\omega-\epsilon)^2\right),
+/// $$
+/// where $K(m)$ is the complete elliptic integral of the first kind. Positions of the band
+/// edges are $\epsilon \pm 2\sqrt{2}t$.
+///
+/// The weight of the flat band is that of one band out of three, as carried by the DOS
+/// averaged over the three sites of the unit cell. It is not the flat band weight of the
+/// local DOS, which vanishes on the corner site and equals $1/2$ on the rim sites.
+pub fn lieb(eps: f64, t: f64) -> SpectralFunction {
+    SpectralFunction::from_discrete_continuous(
+        DiscreteSF::one_resonance(eps, 1.0 / 3.0),
+        vec![(Rc::new(LiebDOS::new(eps, t)), 2.0 / 3.0)],
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use crate::{SpectralFunction, models};
@@ -1182,6 +1296,106 @@ mod tests {
             for (order, moment_ref) in moments_ref.iter().enumerate() {
                 let moment = compute_moment(&dos, order as i32);
                 assert_relative_eq!(moment, moment_ref, max_relative = 1e-10);
+            }
+        }
+    }
+
+    #[test]
+    fn lieb() {
+        use std::f64::consts::{PI, SQRT_2};
+
+        let eps = 0.5f64;
+        let t = 2.0f64;
+        let moments_ref = central_to_moments(
+            eps,
+            even_central_moments(
+                8.0 * t.powi(2) / 3.0,
+                40.0 * t.powi(4) / 3.0,
+                224.0 * t.powi(6) / 3.0,
+            ),
+        );
+
+        let dos = models::lieb(eps, t);
+        let half_width = 2.0 * SQRT_2 * t;
+        assert_eq!(dos.support(), Some((eps - half_width, eps + half_width)));
+        assert_relative_eq!(dos.total_weight(), 1.0, max_relative = 1e-14);
+
+        // The flat band is a δ-function of weight 1/3 at the band center
+        assert_eq!(dos.discrete().len(), 1);
+        assert_eq!(dos.discrete().resonances()[0].eps, eps);
+        assert_relative_eq!(
+            dos.discrete().resonances()[0].weight,
+            1.0 / 3.0,
+            max_relative = 1e-14
+        );
+
+        // Both van Hove singularities diverge, while the point where the dispersive bands
+        // touch the flat band is a zero of their DOS.
+        assert_eq!(dos.continuous_at(eps - 2.0 * t), f64::INFINITY);
+        assert_eq!(dos.continuous_at(eps + 2.0 * t), f64::INFINITY);
+        assert_relative_eq!(dos.continuous_at(eps), 0.0, epsilon = 1e-15);
+
+        // Being those of a two-dimensional band minimum, the band edges are steps of
+        // height K(0)|ω-ε|/(3π^2t^2) = √2/(3πt) rather than zeros
+        for omega_e in [eps - half_width, eps + half_width] {
+            assert_relative_eq!(
+                dos.continuous_at(omega_e),
+                SQRT_2 / (3.0 * PI * t),
+                max_relative = 1e-12
+            );
+        }
+        assert_eq!(dos.continuous_at(eps + 1.1 * half_width), 0.0);
+
+        for (order, moment_ref) in moments_ref.iter().enumerate() {
+            let moment = compute_moment(&dos, order as i32);
+            assert_relative_eq!(moment, moment_ref, max_relative = 1e-10);
+        }
+    }
+
+    #[test]
+    fn lieb_regular_near_singularity() {
+        use crate::ContinuousSF;
+        use crate::models::LiebDOS;
+
+        let (eps, t) = (0.5f64, 2.0f64);
+        let dos = LiebDOS::new(eps, t);
+        let prefactor = 1.0 / (std::f64::consts::PI.powi(2) * t);
+
+        // At the singular points the subtracted logarithm cancels the divergence of
+        // K(1-y^2) up to ln(4)
+        for omega_p in [eps - 2.0 * t, eps + 2.0 * t] {
+            assert_relative_eq!(
+                dos.regular(omega_p),
+                2.0 * prefactor * std::f64::consts::LN_2,
+                max_relative = 1e-14
+            );
+        }
+
+        // R(ε \pm (1+δ)2t) / prefactor at δ = \pm 2^-e, evaluated at 200 bits of precision.
+        // The series expansion takes over at |δ| < 5e-4; by e = 40 it is the only option
+        // left, 1 - y^2 having rounded to unity.
+        let ref_values = [
+            (2, 1.98946838014527, 0.881213016813116),
+            (4, 1.61182181901004, 1.17635167283123),
+            (7, 1.42986716906016, 1.34321545818198),
+            (10, 1.39374613100041, 1.37885427306285),
+            (15, 1.38663282082393, 1.38595591927928),
+            (20, 1.3863082429017, 1.38628047936183),
+            (40, 1.38629436114574, 1.38629436109404),
+        ];
+
+        for (e, ref_plus, ref_minus) in ref_values {
+            for (sign, ref_value) in [(1.0f64, ref_plus), (-1.0, ref_minus)] {
+                let delta = sign * 2f64.powi(-e);
+                // R(ω) is even about ε, both singularities being equivalent
+                for band in [-1.0f64, 1.0] {
+                    let omega = eps + band * (1.0 + delta) * 2.0 * t;
+                    assert_relative_eq!(
+                        dos.regular(omega),
+                        prefactor * ref_value,
+                        max_relative = 1e-8
+                    );
+                }
             }
         }
     }
