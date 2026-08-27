@@ -17,11 +17,11 @@ This crate handles them by splitting each singular model into a smooth part
 $R(\omega)$ and analytically known asymptotics $S_p(\omega)$ around every
 singular point $\Omega_p$,
 
-```math
+$$
 \int A(\omega) f(\omega) d\omega = \int R(\omega) f(\omega) d\omega
     + \sum_p \int S_p(\omega) [f(\omega) - f(\Omega_p)] d\omega
     + \sum_p f(\Omega_p) \int S_p(\omega) d\omega.
-```
+$$
 
 Only the first two terms are integrated numerically, and both integrands are
 regular; the last term uses a closed-form value of $\int S_p(\omega) d\omega$.
@@ -70,7 +70,7 @@ let m1 = dos.integrate(|omega| omega, None).unwrap();
 // Retarded Green's function of a semicircular band at ω + i0⁺
 let z = Complex64::new(0.5, 1e-3);
 let g = semicircle(0.0, 2.0)
-    .integrate_complex(|omega| 1.0 / (z - omega))
+    .integrate_complex(|omega| 1.0 / (z - omega), None)
     .unwrap();
 ```
 
