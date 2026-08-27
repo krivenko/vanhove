@@ -1,10 +1,11 @@
-/// Utility functions
+//! Utility functions.
+
 use bilby::{
     QuadratureError, QuadratureResult, adaptive_integrate, integrate_infinite,
     integrate_semi_infinite_lower, integrate_semi_infinite_upper,
 };
 
-/// Kahan-Babuška-Neumaier summation algorithm
+/// Kahan-Babuška-Neumaier summation algorithm.
 pub fn kahan_babushka_neumaier_sum<I: Iterator<Item = f64>>(input: I) -> f64 {
     let (mut sum, mut c) = (0.0f64, 0.0f64);
     for x in input {
@@ -46,7 +47,7 @@ pub fn bilby_integrate<F: Fn(f64) -> f64>(
     }
 }
 
-/// Fermi step function
+/// Fermi step function.
 pub fn fermi(x: f64) -> f64 {
     if x <= 0.0 {
         1.0 / (1.0 + x.exp())

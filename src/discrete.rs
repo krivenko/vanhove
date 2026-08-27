@@ -1,4 +1,4 @@
-//! Discrete spectral function
+//! Discrete spectral function.
 
 use std::ops::{Add, Mul};
 
@@ -7,9 +7,9 @@ use crate::util;
 /// Single discrete resonance $w \delta(\omega - \varepsilon)$.
 #[derive(Debug, Clone, Copy)]
 pub struct Resonance {
-    /// Position of the resonance, $\varepsilon$
+    /// Position of the resonance, $\varepsilon$.
     pub eps: f64,
-    /// Weight of the resonance, $w$
+    /// Weight of the resonance, $w$.
     pub weight: f64,
 }
 
@@ -23,7 +23,7 @@ pub struct Resonance {
 /// free of negligible weights.
 #[derive(Debug, Clone, Default)]
 pub struct DiscreteSF {
-    /// Resonances $(\varepsilon_p, w_p)$ in the canonical form
+    /// Resonances $(\varepsilon_p, w_p)$ in the canonical form.
     resonances: Vec<Resonance>,
 }
 
@@ -167,12 +167,12 @@ impl DiscreteSF {
     /// the same position is considered a cancellation artefact and is discarded.
     pub const WEIGHT_TOL: f64 = f64::EPSILON;
 
-    /// Make an empty discrete spectral function (zero resonances)
+    /// Make an empty discrete spectral function (zero resonances).
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Make a discrete spectral function with one resonance
+    /// Make a discrete spectral function with one resonance.
     pub fn one_resonance(eps: f64, weight: f64) -> DiscreteSF {
         DiscreteSF::from_iter([Resonance { eps, weight }])
     }
@@ -183,7 +183,7 @@ impl DiscreteSF {
         &self.resonances
     }
 
-    /// Number of resonances in the spectral function
+    /// Number of resonances in the spectral function.
     pub fn len(&self) -> usize {
         self.resonances.len()
     }

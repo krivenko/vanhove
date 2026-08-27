@@ -1,4 +1,4 @@
-//! Model densities of states commonly used in physics
+//! Model densities of states commonly used in physics.
 
 use crate::discrete::{DiscreteSF, Resonance};
 use crate::util::fermi;
@@ -93,7 +93,7 @@ pub fn flat(eps: f64, d: f64, delta: f64) -> SpectralFunction {
 // Gaussian DOS
 //
 
-/// Gaussian density of states
+/// Gaussian density of states.
 struct GaussianDOS {
     eps: f64,
     denom: f64,
@@ -131,7 +131,7 @@ pub fn gaussian(eps: f64, sigma: f64) -> SpectralFunction {
 // Semicircle DOS
 //
 
-/// Semicircle (Wigner) density of states
+/// Semicircle (Wigner) density of states.
 struct SemicircleDOS {
     eps: f64,
     radius: f64,
@@ -202,11 +202,11 @@ pub fn semicircle(eps: f64, r: f64) -> SpectralFunction {
 // Power-law band edge
 //
 
-/// Power-law threshold density of states
+/// Power-law threshold density of states.
 struct PowerLawDOS {
     eps: f64,
     r: f64,
-    /// Band edges
+    /// Band edges.
     edges: [f64; 2],
     singularity: [Singularity; 1],
     prefactor: f64,
@@ -275,11 +275,11 @@ pub fn powerlaw(eps: f64, r: f64, w: f64) -> SpectralFunction {
 // Pseudogap DOS
 //
 
-/// Density of states with a pseudogap
+/// Density of states with a pseudogap.
 struct PseudogapDOS {
     eps: f64,
     r: f64,
-    /// Band edges
+    /// Band edges.
     edges: [f64; 2],
     singularity: [Singularity; 1],
     prefactor: f64,
@@ -337,7 +337,7 @@ pub fn pseudogap(eps: f64, r: f64, d: f64) -> SpectralFunction {
 // Chain DOS
 //
 
-/// Density of states of a linear chain
+/// Density of states of a linear chain.
 struct ChainDOS {
     eps: f64,
     t: f64,
@@ -424,11 +424,11 @@ pub fn chain(eps: f64, t: f64) -> SpectralFunction {
 // Square lattice DOS
 //
 
-/// Density of states of a square lattice
+/// Density of states of a square lattice.
 struct SquareDOS {
     eps: f64,
     t: f64,
-    /// Band edges
+    /// Band edges.
     edges: [f64; 2],
     /// Position of the logarithmic van Hove singularity, which sits at the band center.
     singularity: [Singularity; 1],
@@ -506,11 +506,11 @@ pub fn square(eps: f64, t: f64) -> SpectralFunction {
 // Triangular lattice DOS
 //
 
-/// Density of states of a triangular lattice
+/// Density of states of a triangular lattice.
 struct TriangularDOS {
     eps: f64,
     t: f64,
-    /// Band edges
+    /// Band edges.
     edges: [f64; 2],
     /// Position of the logarithmic van Hove singularity.
     singularity: [Singularity; 1],
@@ -625,7 +625,7 @@ pub fn triangular(eps: f64, t: f64) -> SpectralFunction {
 struct HoneycombDOS {
     eps: f64,
     t: f64,
-    /// Band edges
+    /// Band edges.
     edges: [f64; 2],
     /// Positions of the logarithmic van Hove singularities.
     singularities: [Singularity; 2],
@@ -784,7 +784,7 @@ pub fn kagome(eps: f64, t: f64) -> SpectralFunction {
 struct LiebDOS {
     eps: f64,
     t: f64,
-    /// Band edges
+    /// Band edges.
     edges: [f64; 2],
     /// Positions of the logarithmic van Hove singularities.
     singularities: [Singularity; 2],

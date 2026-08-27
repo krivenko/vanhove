@@ -20,20 +20,20 @@ use crate::discrete::DiscreteSF;
 /// `l` is the limit of $S_p(\omega)$ with the divergent term subtracted.
 #[derive(Debug, Clone, Copy)]
 enum SingularLaw {
-    /// $S_p(\Omega_p)$ is finite, hence given by `asymptotics()` itself
+    /// $S_p(\Omega_p)$ is finite, hence given by `asymptotics()` itself.
     Finite,
-    /// $S_p(\omega) = c|\omega - \Omega_p|^{-a} + l + o(1)$, $a > 0$
+    /// $S_p(\omega) = c|\omega - \Omega_p|^{-a} + l + o(1)$, $a > 0$.
     Power { a: f64, c: f64, l: f64 },
-    /// $S_p(\omega) = -c\ln|\omega - \Omega_p| + l + o(1)$
+    /// $S_p(\omega) = -c\ln|\omega - \Omega_p| + l + o(1)$.
     Log { c: f64, l: f64 },
 }
 
 /// Isolated integrable singularity of a continuous spectral function.
 #[derive(Debug, Clone, Copy)]
 struct Singularity {
-    /// Position of the singular point, $\Omega_p$
+    /// Position of the singular point, $\Omega_p$.
     position: f64,
-    /// Leading behaviour of $S_p(\omega)$ as $\omega \to \Omega_p$
+    /// Leading behaviour of $S_p(\omega)$ as $\omega \to \Omega_p$.
     law: SingularLaw,
 }
 
@@ -47,20 +47,20 @@ struct Singularity {
 /// indices of the slice returned by `singularities()`.
 trait ContinuousSF {
     /// Support of the spectral function specified as a segment
-    /// $[\omega_{min}, \omega_{max}]$
+    /// $[\omega_{min}, \omega_{max}]$.
     fn support(&self) -> (f64, f64);
-    /// Regular part, $R(\omega)$
+    /// Regular part, $R(\omega)$.
     fn regular(&self, omega: f64) -> f64;
-    /// Singular points $\Omega_p$ along with the leading behaviour of $S_p$ at each
+    /// Singular points $\Omega_p$ along with the leading behaviour of $S_p$ at each.
     fn singularities(&self) -> &[Singularity] {
         &[]
     }
-    /// Asymptotic form near the p-th singular point, $S_p(\omega)$
+    /// Asymptotic form near the p-th singular point, $S_p(\omega)$.
     fn asymptotics(&self, _p: usize, _omega: f64) -> f64 {
         unreachable!("this spectral function has no singularities")
     }
     /// Analytically derived value of $\int S_p(\omega)d\omega$ over
-    /// $[\omega_{min}, \omega_{max}]$
+    /// $[\omega_{min}, \omega_{max}]$.
     fn asympt_int(&self, _p: usize) -> f64 {
         unreachable!("this spectral function has no singularities")
     }
