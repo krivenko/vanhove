@@ -424,11 +424,6 @@ pub fn chain(eps: f64, t: f64) -> SpectralFunction {
 // Square lattice DOS
 //
 
-/// Value of $|\omega-\epsilon|/(4t)$ below which the regular part of the square lattice DOS
-/// is evaluated using a series expansion. At the threshold both expressions agree to
-/// within a relative error of $10^{-5}$.
-const SQUARE_DOS_SERIES_THRESHOLD: f64 = 1e-3;
-
 /// Density of states of a square lattice
 struct SquareDOS {
     eps: f64,
@@ -440,6 +435,11 @@ struct SquareDOS {
     prefactor: f64,
 }
 impl SquareDOS {
+    /// Value of $|\omega-\epsilon|/(4t)$ below which the regular part is evaluated using a
+    /// series expansion. At the threshold both expressions agree to within a relative
+    /// error of $10^{-5}$.
+    const SERIES_THRESHOLD: f64 = 1e-3;
+
     fn new(eps: f64, t: f64) -> SquareDOS {
         assert!(t > 0.0, "hopping constant must be positive");
         let prefactor = 1.0 / (2.0 * PI.powi(2) * t);
@@ -466,7 +466,7 @@ impl ContinuousSF for SquareDOS {
         let ax = ((omega - self.eps) / (4.0 * self.t)).abs();
         if ax == 0.0 {
             0.0
-        } else if ax < SQUARE_DOS_SERIES_THRESHOLD {
+        } else if ax < Self::SERIES_THRESHOLD {
             // Close to the singularity, K(1 - ax^2) ≈ ln(4/ax) nearly cancels the
             // logarithm, and evaluating the difference directly is catastrophically
             // inaccurate. Worse, 1 - ax^2 rounds to 1 for ax below ~1e-8, which makes
@@ -506,11 +506,6 @@ pub fn square(eps: f64, t: f64) -> SpectralFunction {
 // Triangular lattice DOS
 //
 
-/// Value of $|\omega-\epsilon-2t|/(8|t|)$ below which the regular part of the triangular
-/// lattice DOS is evaluated using a series expansion. At the threshold both expressions
-/// agree to within a relative error of $10^{-5}$.
-const TRIANGLE_DOS_SERIES_THRESHOLD: f64 = 1e-3;
-
 /// Density of states of a triangular lattice
 struct TriangularDOS {
     eps: f64,
@@ -522,6 +517,11 @@ struct TriangularDOS {
     prefactor: f64,
 }
 impl TriangularDOS {
+    /// Value of $|\omega-\epsilon-2t|/(8|t|)$ below which the regular part is evaluated
+    /// using a series expansion. At the threshold both expressions agree to within a
+    /// relative error of $10^{-5}$.
+    const SERIES_THRESHOLD: f64 = 1e-3;
+
     fn new(eps: f64, t: f64) -> TriangularDOS {
         assert!(t != 0.0, "hopping constant must be non-zero");
         let omega_min = eps + (-6.0 * t).min(3.0 * t);
@@ -550,7 +550,7 @@ impl ContinuousSF for TriangularDOS {
         let ax = ((omega - self.singularity[0].position) / (8.0 * self.t)).abs();
         if ax == 0.0 {
             0.0
-        } else if ax < TRIANGLE_DOS_SERIES_THRESHOLD {
+        } else if ax < Self::SERIES_THRESHOLD {
             // Close to the singularity, K(z_1/z_0)/\sqrt{z_0} ≈ -0.75 ln(ax) nearly cancels
             // the logarithm, and evaluating the difference directly is catastrophically
             // inaccurate. Worse, 1 - z_1/z_0 = O(d^3) drowns in the round-off of z_1/z_0 as
@@ -615,11 +615,6 @@ pub fn triangular(eps: f64, t: f64) -> SpectralFunction {
 // Honeycomb lattice DOS
 //
 
-/// Value of $|t^2-(\omega-\epsilon)^2|/(8t^2)$ below which the regular part of the honeycomb
-/// lattice DOS is evaluated using a series expansion. At the threshold both expressions
-/// agree to within a relative error of $10^{-8}$.
-const HONEYCOMB_DOS_SERIES_THRESHOLD: f64 = 1e-3;
-
 /// Density of states of a honeycomb lattice.
 ///
 /// The two bands $\pm t|f(k)|$ share the single-band dispersion of the triangular lattice
@@ -637,6 +632,11 @@ struct HoneycombDOS {
     prefactor: f64,
 }
 impl HoneycombDOS {
+    /// Value of $|t^2-(\omega-\epsilon)^2|/(8t^2)$ below which the regular part is
+    /// evaluated using a series expansion. At the threshold both expressions agree to
+    /// within a relative error of $10^{-8}$.
+    const SERIES_THRESHOLD: f64 = 1e-3;
+
     fn new(eps: f64, t: f64) -> HoneycombDOS {
         assert!(t > 0.0, "hopping constant must be positive");
         let prefactor = 1.0 / (PI.powi(2) * t);
@@ -677,7 +677,7 @@ impl ContinuousSF for HoneycombDOS {
         let y = 0.125 * d.abs();
         if y == 0.0 {
             -self.prefactor * 0.75 * std::f64::consts::LN_2
-        } else if y < HONEYCOMB_DOS_SERIES_THRESHOLD {
+        } else if y < Self::SERIES_THRESHOLD {
             // Close to a singularity, K(z_1/z_0)/\sqrt{z_0} ≈ -0.75 ln(y) nearly cancels the
             // logarithm, and evaluating the difference directly is catastrophically
             // inaccurate. Worse, 1 - z_1/z_0 = O(d^3) drowns in the round-off of z_1/z_0 as
@@ -774,11 +774,6 @@ pub fn kagome(eps: f64, t: f64) -> SpectralFunction {
 // Lieb lattice DOS
 //
 
-/// Value of $|((\omega-\epsilon)/(2t))^2 - 1|$ below which the regular part of the Lieb
-/// lattice DOS is evaluated using a series expansion. At the threshold both expressions
-/// agree to within a relative error of $10^{-12}$.
-const LIEB_DOS_SERIES_THRESHOLD: f64 = 1e-3;
-
 /// Density of states of the Lieb lattice.
 ///
 /// The two dispersive bands $\pm 2t\sqrt{\cos(k_x)^2 + \cos(k_y)^2}$ share the dispersion
@@ -796,6 +791,11 @@ struct LiebDOS {
     prefactor: f64,
 }
 impl LiebDOS {
+    /// Value of $|((\omega-\epsilon)/(2t))^2 - 1|$ below which the regular part is
+    /// evaluated using a series expansion. At the threshold both expressions agree to
+    /// within a relative error of $10^{-12}$.
+    const SERIES_THRESHOLD: f64 = 1e-3;
+
     fn new(eps: f64, t: f64) -> LiebDOS {
         assert!(t > 0.0, "hopping constant must be positive");
         let prefactor = 1.0 / (PI.powi(2) * t);
@@ -835,7 +835,7 @@ impl ContinuousSF for LiebDOS {
         let y = (ax - 1.0) * (ax + 1.0);
         if y == 0.0 {
             2.0 * self.prefactor * std::f64::consts::LN_2
-        } else if y.abs() < LIEB_DOS_SERIES_THRESHOLD {
+        } else if y.abs() < Self::SERIES_THRESHOLD {
             // 1 - y^2 rounds to unity for small y, making elliptic_k() overflow. Expand it
             // instead as K(1-y^2) = Λ + (y^2/4)(Λ-1) + O(y^4 ln y), where Λ = ln(4/|y|),
             // and pick up the leftover logarithm through ax - 1 = y/(1+ax).
