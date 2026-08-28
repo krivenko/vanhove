@@ -3,7 +3,7 @@
 [![CI](https://github.com/krivenko/vanhove/actions/workflows/CI.yml/badge.svg)](
 https://github.com/krivenko/vanhove/actions/workflows/CI.yml)
 [![crates.io](https://img.shields.io/crates/v/vanhove.svg)](https://crates.io/crates/vanhove)
-[![docs](https://img.shields.io/badge/docs-vanhove-blue)](https://krivenko.github.io/vanhove/)
+[![docs.rs](https://docs.rs/vanhove/badge.svg)](https://docs.rs/vanhove)
 [![license](https://img.shields.io/badge/license-MIT%20or%20Apache--2.0-blue.svg)](#license)
 
 Model densities of states with integrable van Hove singularities, and accurate
@@ -83,8 +83,7 @@ converge for a badly behaved `f`.
 
 ## Documentation
 
-API documentation is available at
-<https://krivenko.github.io/vanhove/>.
+API documentation is available at <https://docs.rs/vanhove>.
 
 Formulas in the docs are rendered with KaTeX, so building them locally requires
 the extra header:
