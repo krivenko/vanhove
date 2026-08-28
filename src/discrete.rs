@@ -27,9 +27,10 @@ pub struct DiscreteSF {
     resonances: Vec<Resonance>,
 }
 
-/// Build a discrete spectral function out of resonances given in an arbitrary
-/// order. Resonances sharing a position are merged, and groups whose total weight
-/// cancels out are dropped.
+/// Build a discrete spectral function out of resonances given in an arbitrary order.
+///
+/// Resonances sharing a position are merged, and groups whose total weight cancels
+/// out are dropped.
 impl FromIterator<Resonance> for DiscreteSF {
     fn from_iter<I: IntoIterator<Item = Resonance>>(resonances: I) -> Self {
         let mut resonances: Vec<Resonance> = resonances
@@ -203,8 +204,10 @@ impl DiscreteSF {
         self.resonances
     }
 
-    /// Support of the spectral function, i.e. the positions of its lowest and
-    /// highest resonances. Returns [`None`] for an empty spectral function.
+    /// Support of the spectral function.
+    ///
+    /// It is the segment between the positions of the lowest and the highest resonances.
+    /// Returns [`None`] for an empty spectral function.
     pub fn support(&self) -> Option<(f64, f64)> {
         Some((self.resonances.first()?.eps, self.resonances.last()?.eps))
     }

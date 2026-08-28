@@ -40,6 +40,7 @@ struct Singularity {
 }
 
 /// Continuous spectral function possibly containing integrable singularities.
+///
 /// It has the form $A(\omega) = R(\omega) + \sum_p S_p(\omega)$ for
 /// $\omega \in [\omega_{min}, \omega_{max}]$ and zero otherwise.
 /// $R(\omega)$ is a smooth function and each $S_p(\omega)$ has one isolated
@@ -121,8 +122,9 @@ impl Add for SpectralFunction {
 }
 impl SpectralFunction {
     /// Build a `SpectralFunction` from a discrete spectral function and a list of
-    /// continuous contributions with their weights. Contributions of zero weight
-    /// are dropped.
+    /// continuous contributions with their weights.
+    ///
+    /// Contributions of zero weight are dropped.
     fn from_discrete_continuous(
         dsf: DiscreteSF,
         mut csf: Vec<(Rc<dyn ContinuousSF>, f64)>,
@@ -144,11 +146,12 @@ impl SpectralFunction {
         &self.discrete
     }
 
-    /// Support of the spectral function, i.e. the smallest segment
-    /// $[\omega_{min}, \omega_{max}]$ containing the supports of all its
-    /// contributions. The segment is not necessarily tight: the spectral function
-    /// may vanish within the gaps between disjoint contributions. Returns [`None`]
-    /// for an empty spectral function.
+    /// Support of the spectral function.
+    ///
+    /// It is the smallest segment $[\omega_{min}, \omega_{max}]$ containing the supports
+    /// of all contributions. The segment is not necessarily tight: the spectral function
+    /// may vanish within the gaps between disjoint contributions. Returns [`None`] for an
+    /// empty spectral function.
     pub fn support(&self) -> Option<(f64, f64)> {
         self.continuous
             .iter()
@@ -163,6 +166,7 @@ impl SpectralFunction {
     }
 
     /// Value of the continuous part of the spectral function at a frequency `omega`.
+    ///
     /// Returns $\pm\infty$ where the spectral function diverges, and zero outside of
     /// the support of every continuous contribution.
     ///
@@ -229,8 +233,11 @@ impl SpectralFunction {
     // Spectral function integration
     //
 
-    /// Given a spectral function $A(\omega)$ and a real-valued function $f(\omega)$,
-    /// compute the integral $\int A(\omega)f(\omega)d\omega$.
+    /// Integrate the spectral function $A(\omega)$ against a real-valued function
+    /// $f(\omega)$.
+    ///
+    /// The integral $\int A(\omega)f(\omega)d\omega$ is computed to the absolute
+    /// tolerance `tol`, which defaults to $10^{-10}$.
     pub fn integrate<F: Fn(f64) -> f64>(
         &self,
         f: F,
@@ -286,8 +293,11 @@ impl SpectralFunction {
         Ok(result)
     }
 
-    /// Given a spectral function $A(\omega)$ and a complex-valued function $f(\omega)$,
-    /// compute the integral $\int A(\omega)f(\omega)d\omega$.
+    /// Integrate the spectral function $A(\omega)$ against a complex-valued function
+    /// $f(\omega)$.
+    ///
+    /// The real and imaginary parts of $\int A(\omega)f(\omega)d\omega$ are computed
+    /// separately, each to the absolute tolerance `tol`.
     pub fn integrate_complex<F: Fn(f64) -> Complex64>(
         &self,
         f: F,
@@ -297,8 +307,9 @@ impl SpectralFunction {
             + Complex64::I * self.integrate(|omega| f(omega).im, tol)?)
     }
 
-    /// Evaluate value of the broadened spectral function at a frequency `omega` by
-    /// computing its convolution with the Lorentzian line shape function of the
+    /// Value of the broadened spectral function at a frequency `omega`.
+    ///
+    /// The broadening is a convolution with the Lorentzian line shape function of the
     /// half-width at half-maximum `delta`,
     /// $$
     ///     \int \frac{1}{\pi} \frac{\delta}{\delta^2 + (\omega-\omega')^2}

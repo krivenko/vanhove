@@ -7,9 +7,9 @@
 Model densities of states with integrable van Hove singularities, and accurate
 integration of spectral functions.
 
-Many quantities in condensed matter physics are spectral integrals
+Many quantities in condensed matter physics are frequency integrals
 $\int A(\omega) f(\omega) d\omega$ of a spectral function $A(\omega)$ against
-some function $f(\omega)$. Doing this numerically is awkward whenever
+some function $f(\omega)$. Doing such integrals numerically is awkward whenever
 $A(\omega)$ has van Hove singularities: they defeat generic adaptive quadrature
 even though the integrals themselves converge.
 
@@ -30,20 +30,20 @@ The numerical work is delegated to the
 
 ## Models
 
-| Function                    | Density of states                                             |
-| --------------------------- | ------------------------------------------------------------- |
-| `discrete(levels, weights)` | discrete levels, $\sum_p w_p \delta(\omega - \varepsilon_p)$  |
-| `flat(eps, d, delta)`       | flat band with Fermi-like edges, sharp for `delta = 0`        |
-| `gaussian(eps, sigma)`      | Gaussian                                                      |
-| `semicircle(eps, r)`        | semicircle (Wigner), square-root band edges                   |
-| `powerlaw(eps, r, w)`       | one-sided power-law band edge, divergent for `r < 0`          |
-| `pseudogap(eps, r, d)`      | pseudogap, $\lvert\omega-\epsilon\rvert^r$ at the band center |
-| `chain(eps, t)`             | linear chain, square-root divergent edges                     |
-| `square(eps, t)`            | square lattice, logarithmic van Hove peak                     |
-| `triangular(eps, t)`        | triangular lattice, asymmetric with a logarithmic peak        |
-| `honeycomb(eps, t)`         | honeycomb lattice, two logarithmic peaks about a Dirac point  |
-| `kagome(eps, t)`            | Kagome lattice, flat band $\delta$-peak at a band edge        |
-| `lieb(eps, t)`              | Lieb lattice, flat band $\delta$-peak at the band center      |
+| Function                    | Density of states                                                   |
+| --------------------------- | ------------------------------------------------------------------- |
+| `discrete(levels, weights)` | Sum of discrete levels, $\sum_p w_p \delta(\omega - \varepsilon_p)$ |
+| `flat(eps, d, delta)`       | Flat band with Fermi-like edges, sharp for `delta = 0`              |
+| `gaussian(eps, sigma)`      | Gaussian                                                            |
+| `semicircle(eps, r)`        | Semicircle (Wigner), square-root band edges                         |
+| `powerlaw(eps, r, w)`       | One-sided power-law band edge, divergent for `r < 0`                |
+| `pseudogap(eps, r, d)`      | Pseudogap, $\lvert\omega-\epsilon\rvert^r$ at the band center       |
+| `chain(eps, t)`             | Linear chain, square-root divergent edges                           |
+| `square(eps, t)`            | Square lattice, logarithmic van Hove peak                           |
+| `triangular(eps, t)`        | Triangular lattice, asymmetric with a logarithmic peak              |
+| `honeycomb(eps, t)`         | Honeycomb lattice, two logarithmic peaks about a Dirac point        |
+| `kagome(eps, t)`            | Kagome lattice, flat band $\delta$-peak at a band edge              |
+| `lieb(eps, t)`              | Lieb lattice, flat band $\delta$-peak at the band center            |
 
 Every model is normalized to unit spectral weight. They can be scaled by real
 numbers and added together, so mixed discrete/continuous spectra are built by
@@ -67,7 +67,8 @@ assert_eq!(dos.total_weight(), 1.0);
 // First spectral moment ∫A(ω) ω dω
 let m1 = dos.integrate(|omega| omega, None).unwrap();
 
-// Retarded Green's function of a semicircular band at ω + i0⁺
+// Retarded Green's function of a semicircular band at z = 0.5 + 10⁻³i,
+// just above the real axis
 let z = Complex64::new(0.5, 1e-3);
 let g = semicircle(0.0, 2.0)
     .integrate_complex(|omega| 1.0 / (z - omega), None)
@@ -92,5 +93,13 @@ RUSTDOCFLAGS="--html-in-header katex-header.html" cargo doc --no-deps --open
 
 ## License
 
-Licensed under either of [Apache License, Version 2.0](LICENSE-APACHE) or
-[MIT license](LICENSE-MIT) at your option.
+Licensed under either of
+
+- Apache License, Version 2.0
+  ([LICENSE-APACHE](https://github.com/krivenko/vanhove/blob/main/LICENSE-APACHE)
+  or <https://www.apache.org/licenses/LICENSE-2.0>)
+- MIT license
+  ([LICENSE-MIT](https://github.com/krivenko/vanhove/blob/main/LICENSE-MIT)
+  or <https://opensource.org/licenses/MIT>)
+
+at your option.

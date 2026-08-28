@@ -12,11 +12,13 @@ use std::rc::Rc;
 // Discrete DOS
 //
 
-/// Returns density of states comprised by a finite number of
-/// discrete energy levels $\varepsilon_p$ with given weights $w_p$,
+/// Returns density of states made up of a finite number of discrete resonances.
+///
+/// The density of states is a sum
 /// $$
-///     A(\omega) = \sum_p w_p \delta(\omega - \varepsilon_p).
+///     A(\omega) = \sum_p w_p \delta(\omega - \varepsilon_p),
 /// $$
+/// where $\varepsilon_p$ are energy `levels` and $w_p$ are their respective `weights`.
 pub fn discrete(levels: &[f64], weights: &[f64]) -> SpectralFunction {
     SpectralFunction::from_discrete_continuous(
         levels
@@ -74,17 +76,19 @@ impl ContinuousSF for FlatDOS {
     }
 }
 
-/// Returns the normalized flat density of states centered at `eps` with half-bandwidth `d`,
-/// and smooth, Fermi-like band edges of width `delta`,
+/// Returns normalized flat density of states, optionally with smooth, Fermi-like band edges.
+///
+/// The flat density of states is centered at `eps`, has half-bandwidth `d`, and smooth
+/// band edges of width `delta`,
 /// $$
 ///     A(\omega) = \frac{1}{d(1 + \coth(d / \delta))}
 ///         \frac{1}{(e^{(\omega-\epsilon-d)/\delta}+1)(e^{-(\omega-\epsilon+d)/\delta}+1)}.
 /// $$
 /// $\delta=0$ is a valid value that turns the edges into sharp discontinuous jumps,
 /// $$
-///     A(\omega) = \frac{1}{2d}\theta(d - |\omega-\epsilon|),
+///     A(\omega) = \frac{1}{2d}\theta(d - |\omega-\epsilon|).
 /// $$
-/// the jump points $\omega = \epsilon \pm d$ evaluating to $1/(2d)$.
+/// At the jump points $\omega = \epsilon \pm d$, $A(\omega)$ evaluates to $1/(2d)$.
 pub fn flat(eps: f64, d: f64, delta: f64) -> SpectralFunction {
     SpectralFunction::from_continuous(FlatDOS::new(eps, d, delta))
 }
@@ -118,7 +122,9 @@ impl ContinuousSF for GaussianDOS {
     }
 }
 
-/// Returns the normalized Gaussian density of states centered at `eps` with width `sigma`,
+/// Returns normalized Gaussian density of states.
+///
+/// The density of states is centered at `eps` and has width `sigma`,
 /// $$
 ///     A(\omega) = \frac{1}{\sqrt{2\pi\sigma^2}}
 ///         \exp\left(-\frac{(\omega - \epsilon)^2}{2\sigma^2}\right).
@@ -189,10 +195,12 @@ impl ContinuousSF for SemicircleDOS {
     }
 }
 
-/// Returns the normalized semicircle (Wigner) density of states centered at `eps` with
-/// radius `r`,
+/// Returns normalized semicircle (Wigner) density of states.
+///
+/// The density of states is centered at `eps` and has radius `r`,
 /// $$
-///     A(\omega) = \frac{2}{\pi r^2} \sqrt{r^2 - \omega^2}\theta(r^2 - \omega^2).
+///     A(\omega) = \frac{2}{\pi r^2} \sqrt{r^2 - (\omega-\epsilon)^2}
+///         \theta(r^2 - (\omega-\epsilon)^2).
 /// $$
 pub fn semicircle(eps: f64, r: f64) -> SpectralFunction {
     SpectralFunction::from_continuous(SemicircleDOS::new(eps, r))
@@ -259,14 +267,15 @@ impl ContinuousSF for PowerLawDOS {
     }
 }
 
-/// Returns the normalized density of states with a power-law band edge
-/// located at `eps`. The power-law asymptotics is characterized by
+/// Returns normalized density of states with a power-law band edge.
+///
+/// The band edge is located at `eps`. The power-law asymptotics is characterized by
 /// the exponent `r > -1`,
 /// $$
 ///     A(\omega) = \frac{r+1}{w^{r+1}} (\omega - \epsilon)^r
 ///         \theta(\omega-\epsilon) \theta(w - (\omega-\epsilon)),
 /// $$
-/// and `w` is the bandwidth.
+/// where `w` is the bandwidth.
 pub fn powerlaw(eps: f64, r: f64, w: f64) -> SpectralFunction {
     SpectralFunction::from_continuous(PowerLawDOS::new(eps, r, w))
 }
@@ -322,13 +331,15 @@ impl ContinuousSF for PseudogapDOS {
     }
 }
 
-/// Returns the normalized density of states with a pseudogap located at `eps` with
-/// power-law asymptotics characterized by the positive exponent `r`,
+/// Returns normalized density of states with a pseudogap.
+///
+/// The pseudogap is located at `eps` and has power-law asymptotics characterized
+/// by the positive exponent `r`,
 /// $$
 ///     A(\omega) = \frac{1+r}{2 d^{1+r}} |\omega - \epsilon|^r
-///         \theta(d^2 - (\omega-\epsilon)^2).
+///         \theta(d^2 - (\omega-\epsilon)^2),
 /// $$
-/// and the half-bandwidth `d`.
+/// where `d` is the half-bandwidth.
 pub fn pseudogap(eps: f64, r: f64, d: f64) -> SpectralFunction {
     SpectralFunction::from_continuous(PseudogapDOS::new(eps, r, d))
 }
@@ -409,9 +420,11 @@ impl ContinuousSF for ChainDOS {
     }
 }
 
-/// Returns the normalized density of states of a linear chain with the hopping constant `t`
-/// and the local energy level `eps` (derived from the dispersion law
-/// $\varepsilon(k) = \epsilon - 2t\cos(k)$),
+/// Returns normalized density of states of a linear chain.
+///
+/// The linear chain is defined by the hopping constant `t` and the local energy level `eps`.
+/// The density of states is derived from the dispersion law
+/// $\varepsilon(k) = \epsilon - 2t\cos(k)$,
 /// $$
 ///     A(\omega) = \frac{1}{\pi} \frac{1}{\sqrt{(2t)^2 - (\omega-\epsilon)^2}}
 ///         \theta((2t)^2 - (\omega-\epsilon)^2).
@@ -490,9 +503,11 @@ impl ContinuousSF for SquareDOS {
     }
 }
 
-/// Returns the normalized density of states of a square lattice with the hopping constant
-/// `t` and the local energy level `eps` (derived from the dispersion law
-/// $\varepsilon(k) = \epsilon - 2t[\cos(k_x) + \cos(k_y)]$),
+/// Returns normalized density of states of a square lattice.
+///
+/// The square lattice is defined by the hopping constant `t` and the local energy
+/// level `eps`. The density of states is derived from the dispersion law
+/// $\varepsilon(k) = \epsilon - 2t[\cos(k_x) + \cos(k_y)]$,
 /// $$
 ///     A(\omega) = \frac{1}{2\pi^2 t} K\left(1 - \left(\frac{\omega-\epsilon}{4t}\right)^2\right)
 ///         \theta((4t)^2 - (\omega-\epsilon)^2),
@@ -586,9 +601,11 @@ impl ContinuousSF for TriangularDOS {
     }
 }
 
-/// Returns the normalized density of states of a triangular lattice with the hopping constant
-/// `t` and the local energy level `eps` (derived from the dispersion law
-/// $\varepsilon(k) = \epsilon - 2t[\cos(k_x) + 2\cos(k_x/2)\cos(\sqrt{3} k_y/2)]$),
+/// Returns normalized density of states of a triangular lattice.
+///
+/// The triangular lattice is defined by the hopping constant `t` and the local energy
+/// level `eps`. The density of states is derived from the dispersion law
+/// $\varepsilon(k) = \epsilon - 2t[\cos(k_x) + 2\cos(k_x/2)\cos(\sqrt{3} k_y/2)]$,
 /// $$
 ///     A(\omega) = \frac{1}{\pi^2|t|\sqrt{z_0(\omega-\epsilon)}}
 ///         K\left(\frac{z_1(\omega-\epsilon)}{z_0(\omega-\epsilon)}\right)
@@ -711,9 +728,11 @@ impl ContinuousSF for HoneycombDOS {
     }
 }
 
-/// Returns the normalized density of states of a honeycomb lattice with the hopping constant
-/// `t` and the local energy level `eps` (derived from the two-band dispersion law
-/// $\varepsilon_\pm(k) = \epsilon \pm t\sqrt{3 + 2[\cos(k_x) + 2\cos(k_x/2)\cos(\sqrt{3}k_y/2)]}$),
+/// Returns normalized density of states of a honeycomb lattice.
+///
+/// The honeycomb lattice is defined by the hopping constant `t` and the local energy level
+/// `eps`. The density of states is derived from the two-band dispersion law
+/// $\varepsilon_\pm(k) = \epsilon \pm t\sqrt{3 + 2[\cos(k_x) + 2\cos(k_x/2)\cos(\sqrt{3}k_y/2)]}$,
 /// $$
 ///     A(\omega) = \frac{|\omega-\epsilon|}{\pi^2 t^2\sqrt{z_0(\omega-\epsilon)}}
 ///         K\left(\frac{z_1(\omega-\epsilon)}{z_0(\omega-\epsilon)}\right)
@@ -738,11 +757,13 @@ pub fn honeycomb(eps: f64, t: f64) -> SpectralFunction {
 // Kagome lattice DOS
 //
 
-/// Returns the normalized density of states of the Kagome lattice with the hopping constant
-/// `t` and the local energy level `eps` (derived from the two-band dispersion law
+/// Returns normalized density of states of the Kagome lattice.
+///
+/// The Kagome lattice is defined by the hopping constant `t` and the local energy
+/// level `eps`. The density of states is derived from the two-band dispersion law
 /// $\varepsilon_\pm(k) = \epsilon + t \left(1 \pm
 /// \sqrt{3 + 2[\cos(k_x) + 2\cos(k_x/2)\cos(\sqrt{3}k_y/2)]}\right)$,
-/// and a third flat band $\varepsilon_F(k) = \epsilon - 2t$),
+/// and a third flat band $\varepsilon_F(k) = \epsilon - 2t$,
 /// $$
 ///     A(\omega) = \frac{1}{3}\delta(\omega-\epsilon+2t) +
 ///         \frac{2}{3}\frac{|\omega-\epsilon-t|}{\pi^2 t^2\sqrt{z_0(\omega-\epsilon-t)}}
@@ -861,10 +882,12 @@ impl ContinuousSF for LiebDOS {
     }
 }
 
-/// Returns the normalized density of states of the Lieb lattice with the hopping constant
-/// `t` and the local energy level `eps` (derived from the two-band dispersion law
+/// Returns normalized density of states of the Lieb lattice.
+///
+/// The Lieb lattice is defined by the hopping constant `t` and the local energy
+/// level `eps`. The density of states is derived from the two-band dispersion law
 /// $\varepsilon_\pm(k) = \epsilon \pm 2t\sqrt{\cos(k_x)^2 + \cos(k_y)^2}$
-/// and a third flat band $\varepsilon_F(k) = \epsilon$),
+/// and a third flat band $\varepsilon_F(k) = \epsilon$,
 /// $$
 ///     A(\omega) = \frac{1}{3} \delta(\omega-\epsilon) +
 ///         \frac{|\omega-\epsilon|}{3\pi^2 t^2}
