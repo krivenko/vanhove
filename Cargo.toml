@@ -13,7 +13,7 @@ readme = "README.md"
 repository = "https://github.com/krivenko/vanhove"
 documentation = "https://docs.rs/vanhove"
 
-include = ["/src", "katex-header.html", "LICENSE-APACHE", "LICENSE-MIT"]
+include = ["/src", "katex-header.html", "LICENSE-APACHE", "LICENSE-MIT", "CHANGELOG.md"]
 
 [dependencies]
 bilby = "0.3.0"

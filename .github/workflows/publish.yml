@@ -65,9 +65,22 @@ jobs:
       - name: Build the release asset
         run: cargo package --no-verify
 
+      - name: Extract the release notes from the changelog
+        run: |
+          awk -v version="${GITHUB_REF_NAME#v}" '
+            index($0, "## [" version "]") == 1 { found = 1; next }
+            found && /^## / { exit }
+            found && /^\[[^]]+\]: / { next }
+            found { print }
+          ' CHANGELOG.md > release-notes.md
+          if [ ! -s release-notes.md ]; then
+            echo "::error::CHANGELOG.md has no section for $GITHUB_REF_NAME"
+            exit 1
+          fi
+
       - uses: softprops/action-gh-release@v3
         with:
           files: target/package/*.crate
           fail_on_unmatched_files: true
-          generate_release_notes: true
+          body_path: release-notes.md
           prerelease: ${{ contains(github.ref_name, '-') }}
