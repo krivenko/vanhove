@@ -7,7 +7,7 @@ pub mod models;
 mod util;
 
 use std::f64::consts::PI;
-use std::ops::{Add, Mul};
+use std::ops::{Add, Mul, Neg};
 use std::rc::Rc;
 
 use bilby::QuadratureError;
@@ -107,6 +107,13 @@ impl Mul<SpectralFunction> for f64 {
     type Output = SpectralFunction;
     fn mul(self, sf: SpectralFunction) -> SpectralFunction {
         sf * self
+    }
+}
+/// Multiply spectral function by -1.
+impl Neg for SpectralFunction {
+    type Output = Self;
+    fn neg(self) -> SpectralFunction {
+        self * (-1.0)
     }
 }
 /// Addition of two spectral functions.
@@ -452,6 +459,49 @@ mod tests {
         assert!(scaled.discrete.is_empty());
         assert!(scaled.continuous.is_empty());
         assert_eq!(scaled.total_weight(), 0.0);
+    }
+
+    #[test]
+    fn neg() {
+        let dos = 2.0 * discrete(&[-0.7, 1.2], &[0.25, 0.6]) + 5.0 * gaussian(1.4, 0.5);
+        let neg_dos = -dos.clone();
+
+        // Negation flips the sign of every weight while preserving the structure
+        assert_eq!(neg_dos.discrete.len(), 2);
+        assert_eq!(neg_dos.continuous.len(), 1);
+        assert_eq!(neg_dos.support(), dos.support());
+        assert_relative_eq!(neg_dos.total_weight(), -dos.total_weight(), epsilon = 1e-12);
+        assert_relative_eq!(
+            neg_dos.discrete().find(1.2).unwrap().weight,
+            -1.2,
+            epsilon = 1e-12
+        );
+        for omega in [-1.0, 0.5, 1.4, 3.0] {
+            assert_relative_eq!(
+                neg_dos.continuous_at(omega),
+                -dos.continuous_at(omega),
+                max_relative = 1e-12
+            );
+        }
+
+        // A divergence changes sign along with the spectral function
+        let (eps, t) = (0.5f64, 1.0f64);
+        assert_eq!((-square(eps, t)).continuous_at(eps), f64::NEG_INFINITY);
+
+        // Negating twice is the identity
+        let dos2 = -(-dos.clone());
+        assert_relative_eq!(dos2.total_weight(), dos.total_weight(), epsilon = 1e-12);
+        assert_relative_eq!(
+            dos2.continuous_at(0.5),
+            dos.continuous_at(0.5),
+            epsilon = 1e-12
+        );
+
+        // A spectral function and its negation cancel each other out
+        let zero = dos.clone() + (-dos);
+        assert!(zero.discrete.is_empty());
+        assert_relative_eq!(zero.total_weight(), 0.0, epsilon = 1e-12);
+        assert_eq!(zero.continuous_at(1.4), 0.0);
     }
 
     #[test]
