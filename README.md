@@ -41,6 +41,7 @@ The numerical work is delegated to the
 | `powerlaw(eps, r, w)`       | One-sided power-law band edge, divergent for `r < 0`                |
 | `pseudogap(eps, r, d)`      | Pseudogap, $\lvert\omega-\epsilon\rvert^r$ at the band center       |
 | `chain(eps, t)`             | Linear chain, square-root divergent edges                           |
+| `bethe(z, eps, t)`          | Bethe lattice of coordination number `z`, square-root band edges    |
 | `square(eps, t)`            | Square lattice, logarithmic van Hove peak                           |
 | `triangular(eps, t)`        | Triangular lattice, asymmetric with a logarithmic peak              |
 | `honeycomb(eps, t)`         | Honeycomb lattice, two logarithmic peaks about a Dirac point        |

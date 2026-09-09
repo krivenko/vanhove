@@ -434,6 +434,102 @@ pub fn chain(eps: f64, t: f64) -> SpectralFunction {
 }
 
 //
+// Bethe lattice DOS
+//
+
+/// Density of states of a Bethe lattice.
+struct BetheDOS {
+    eps: f64,
+    /// Band edges.
+    edges: [Singularity; 2],
+    num_scale: f64,
+    denom_scale: f64,
+    prefactor: f64,
+    s_prefactor: f64,
+    s_int: f64,
+}
+impl BetheDOS {
+    fn new(z: u32, eps: f64, t: f64) -> BetheDOS {
+        assert!(z >= 3, "coordination number z must be at least 3");
+        assert!(t > 0.0, "hopping constant must be positive");
+        let z = f64::from(z);
+        let sz1 = (z - 1.0).sqrt();
+        let num_scale = 2.0 * sz1 * t;
+        let denom_scale = z * t;
+        let prefactor = sz1 / (PI * denom_scale);
+        // Value of the denominator 1 - ((ω-ε)/(zt))^2 at the band edges
+        let edge_denom = (1.0 - 2.0 / z).powi(2);
+        BetheDOS {
+            eps,
+            edges: [
+                Singularity {
+                    position: eps - num_scale,
+                    law: SingularLaw::Finite,
+                },
+                Singularity {
+                    position: eps + num_scale,
+                    law: SingularLaw::Finite,
+                },
+            ],
+            num_scale,
+            denom_scale,
+            prefactor,
+            s_prefactor: prefactor / edge_denom,
+            s_int: 16.0 / (3.0 * PI) * z * (z - 1.0) / (z - 2.0).powi(2),
+        }
+    }
+}
+impl ContinuousSF for BetheDOS {
+    fn support(&self) -> (f64, f64) {
+        (self.edges[0].position, self.edges[1].position)
+    }
+    fn regular(&self, omega: f64) -> f64 {
+        if omega == self.edges[0].position || omega == self.edges[1].position {
+            -2.0 * self.s_prefactor
+        } else {
+            let domega = omega - self.eps;
+            let x = domega / self.num_scale;
+            let y = domega / self.denom_scale;
+            self.prefactor * (1.0 - x * x).sqrt() / (1.0 - y * y)
+                - self.s_prefactor * ((2.0 * (1.0 - x)).sqrt() + (2.0 * (1.0 + x)).sqrt())
+        }
+    }
+    fn singularities(&self) -> &[Singularity] {
+        &self.edges
+    }
+    fn asymptotics(&self, p: usize, omega: f64) -> f64 {
+        debug_assert!(p <= 1);
+        let x = (omega - self.eps) / self.num_scale;
+        // p == 0 is the lower edge, p == 1 the upper one
+        let sign = if p == 0 { 1.0 } else { -1.0 };
+        self.s_prefactor * (2.0 * (1.0 + sign * x)).sqrt()
+    }
+    fn asympt_int(&self, _p: usize) -> f64 {
+        self.s_int
+    }
+}
+
+/// Returns normalized density of states of a Bethe lattice with a finite coordination
+/// number.
+///
+/// The Bethe lattice is defined by the coordination number `z`, the hopping constant `t`
+/// and the local energy level `eps`,
+/// $$
+///     A(\omega) = \frac{z}{2\pi}
+///         \frac{\sqrt{(2\sqrt{z-1}t)^2 - (\omega-\epsilon)^2}}
+///         {(zt)^2 - (\omega-\epsilon)^2}
+///         \theta((2\sqrt{z-1}t)^2 - (\omega-\epsilon)^2).
+/// $$
+/// At $z = 2$ the lattice degenerates into a linear chain (see [`chain()`]).
+pub fn bethe(z: u32, eps: f64, t: f64) -> SpectralFunction {
+    assert!(z >= 2, "coordination number z must be at least 2");
+    match z {
+        2 => chain(eps, t),
+        _ => SpectralFunction::from_continuous(BetheDOS::new(z, eps, t)),
+    }
+}
+
+//
 // Square lattice DOS
 //
 
@@ -1107,6 +1203,82 @@ mod tests {
             let moment = compute_moment(&dos, order as i32);
             assert_relative_eq!(moment, moment_ref, max_relative = 1e-10);
         }
+    }
+
+    #[test]
+    fn bethe() {
+        let eps = 0.5f64;
+        let t = 2.0f64;
+
+        // The central moments count the closed walks on the lattice,
+        // μ_2 = z t^2, μ_4 = z(2z-1) t^4 and μ_6 = z(5z^2-6z+2) t^6
+        for z in [2u32, 3, 4, 10, 100] {
+            let zf = f64::from(z);
+            let moments_ref = central_to_moments(
+                eps,
+                even_central_moments(
+                    zf * t.powi(2),
+                    zf * (2.0 * zf - 1.0) * t.powi(4),
+                    zf * (5.0 * zf.powi(2) - 6.0 * zf + 2.0) * t.powi(6),
+                ),
+            );
+
+            let dos = models::bethe(z, eps, t);
+            assert_eq!(
+                dos.support(),
+                Some((
+                    eps - 2.0 * (zf - 1.0).sqrt() * t,
+                    eps + 2.0 * (zf - 1.0).sqrt() * t
+                ))
+            );
+            for (order, moment_ref) in moments_ref.iter().enumerate() {
+                let moment = compute_moment(&dos, order as i32);
+                assert_relative_eq!(moment, moment_ref, max_relative = 1e-10);
+            }
+        }
+    }
+
+    #[test]
+    fn bethe_chain_limit() {
+        // At z = 2 the Bethe lattice is a linear chain, band edge divergence included
+        let (eps, t) = (0.5f64, 2.0f64);
+        let (bethe, chain) = (models::bethe(2, eps, t), models::chain(eps, t));
+        assert_eq!(bethe.support(), chain.support());
+        for omega in [eps - 2.0 * t, eps - 1.5, eps, eps + 3.0, eps + 2.0 * t] {
+            assert_eq!(bethe.continuous_at(omega), chain.continuous_at(omega));
+        }
+    }
+
+    #[test]
+    fn bethe_continuous_at() {
+        use std::f64::consts::PI;
+
+        // A(ω) is reassembled from the regular part and the two edge asymptotics
+        let (eps, t) = (0.5f64, 2.0f64);
+        for z in [3u32, 6, 50] {
+            let (zf, dos) = (f64::from(z), models::bethe(z, eps, t));
+            let d = 2.0 * (zf - 1.0).sqrt() * t;
+            let a = |omega: f64| {
+                let domega: f64 = omega - eps;
+                zf / (2.0 * PI) * (d.powi(2) - domega.powi(2)).sqrt()
+                    / ((zf * t).powi(2) - domega.powi(2))
+            };
+            for x in [-0.999, -0.5, 0.0, 0.25, 0.999] {
+                let omega = eps + x * d;
+                assert_relative_eq!(dos.continuous_at(omega), a(omega), max_relative = 1e-10);
+            }
+
+            // The square-root band edges are singular points where A(ω) vanishes
+            assert_eq!(dos.continuous_at(eps - d), 0.0);
+            assert_eq!(dos.continuous_at(eps + d), 0.0);
+            assert_eq!(dos.continuous_at(eps + 1.5 * d), 0.0);
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "coordination number z must be at least 2")]
+    fn bethe_invalid_z() {
+        let _ = models::bethe(1, 0.5, 2.0);
     }
 
     #[test]
