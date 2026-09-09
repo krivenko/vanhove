@@ -235,7 +235,7 @@ mod tests {
     use approx::assert_relative_eq;
 
     #[test]
-    fn discrete_dos() {
+    fn add() {
         let sf = DiscreteSF::new();
         assert!(sf.is_empty());
         assert_eq!(sf.resonances().len(), 0);
@@ -265,7 +265,7 @@ mod tests {
     }
 
     #[test]
-    fn discrete_dos_from_iter() {
+    fn from_iter() {
         let batch: Vec<Resonance> = (0..100)
             .map(|n| Resonance {
                 eps: ((n * 37) % 20) as f64 - 10.0,
@@ -302,7 +302,7 @@ mod tests {
     }
 
     #[test]
-    fn discrete_dos_find() {
+    fn find() {
         let sf = DiscreteSF::from_iter((0..64).map(|n| Resonance {
             eps: (n - 32) as f64 / 2.0,
             weight: 1.0 / 64.0,
@@ -324,7 +324,7 @@ mod tests {
     }
 
     #[test]
-    fn discrete_dos_mul() {
+    fn mul() {
         let sf = DiscreteSF::one_resonance(2.0, 1.0) + DiscreteSF::one_resonance(-1.5, 0.25);
 
         let sf = sf * 4.0;
