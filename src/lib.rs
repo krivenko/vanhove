@@ -4,6 +4,7 @@
 
 pub mod discrete;
 pub mod models;
+mod singularity;
 mod util;
 
 use std::f64::consts::PI;
@@ -14,32 +15,11 @@ use bilby::QuadratureError;
 use num_complex::Complex64;
 
 use crate::discrete::DiscreteSF;
+use crate::singularity::{Singularity, Strength};
 
 //
 // ContinuousSF
 //
-
-/// Leading behaviour of $S_p(\omega)$ as $\omega \to \Omega_p$.
-///
-/// `l` is the limit of $S_p(\omega)$ with the divergent term subtracted.
-#[derive(Debug, Clone, Copy)]
-enum SingularLaw {
-    /// $S_p(\Omega_p)$ is finite, hence given by `asymptotics()` itself.
-    Finite,
-    /// $S_p(\omega) = c|\omega - \Omega_p|^{-a} + l + o(1)$, $a > 0$.
-    Power { a: f64, c: f64, l: f64 },
-    /// $S_p(\omega) = -c\ln|\omega - \Omega_p| + l + o(1)$.
-    Log { c: f64, l: f64 },
-}
-
-/// Isolated integrable singularity of a continuous spectral function.
-#[derive(Debug, Clone, Copy)]
-struct Singularity {
-    /// Position of the singular point, $\Omega_p$.
-    position: f64,
-    /// Leading behaviour of $S_p(\omega)$ as $\omega \to \Omega_p$.
-    law: SingularLaw,
-}
 
 /// Continuous spectral function possibly containing integrable singularities.
 ///
@@ -48,26 +28,18 @@ struct Singularity {
 /// $R(\omega)$ is a smooth function and each $S_p(\omega)$ has one isolated
 /// integrable singularity at $\Omega_p$.
 ///
-/// The singular terms are keyed by their index p, which runs over the valid
-/// indices of the slice returned by `singularities()`.
+/// $S_p(\omega)$ is described in closed form by the corresponding [`Singularity`],
+/// which fixes it over the whole support and not merely near $\Omega_p$. A support
+/// carrying singularities must be bounded.
 trait ContinuousSF {
     /// Support of the spectral function specified as a segment
     /// $[\omega_{min}, \omega_{max}]$.
     fn support(&self) -> (f64, f64);
     /// Regular part, $R(\omega)$.
     fn regular(&self, omega: f64) -> f64;
-    /// Singular points $\Omega_p$ along with the leading behaviour of $S_p$ at each.
+    /// Singular points $\Omega_p$ along with the closed form of $S_p$ at each.
     fn singularities(&self) -> &[Singularity] {
         &[]
-    }
-    /// Asymptotic form near the p-th singular point, $S_p(\omega)$.
-    fn asymptotics(&self, _p: usize, _omega: f64) -> f64 {
-        unreachable!("this spectral function has no singularities")
-    }
-    /// Analytically derived value of $\int S_p(\omega)d\omega$ over
-    /// $[\omega_{min}, \omega_{max}]$.
-    fn asympt_int(&self, _p: usize) -> f64 {
-        unreachable!("this spectral function has no singularities")
     }
 }
 
@@ -189,10 +161,9 @@ impl SpectralFunction {
     /// The discrete resonances are left out, a $\delta$-function having no value at a
     /// point. Use [`SpectralFunction::discrete()`] to inspect them.
     pub fn continuous_at(&self, omega: f64) -> f64 {
-        // Divergent laws encountered at omega, grouped by rank: (rank, ∑ w c, ∑ |w c|).
-        // The rank orders the laws by strength, a power law |ω-Ω_p|^{-a} being stronger
-        // than a logarithm for any a > 0.
-        let mut divergent: Vec<(f64, f64, f64)> = Vec::new();
+        // Divergent terms encountered at omega, grouped by strength:
+        // (strength, ∑ w c, ∑ |w c|).
+        let mut divergent: Vec<(Strength, f64, f64)> = Vec::new();
         // Everything that stays finite at omega
         let mut finite = 0.0f64;
 
@@ -204,43 +175,36 @@ impl SpectralFunction {
             }
 
             let mut value = csf.regular(omega);
-            for (p, sing) in csf.singularities().iter().enumerate() {
+            for sing in csf.singularities() {
                 // Away from Ω_p the asymptotics is finite and needs no analysis
                 if sing.position != omega {
-                    value += csf.asymptotics(p, omega);
+                    value += sing.value(omega);
                     continue;
                 }
-                let (rank, c, l) = match sing.law {
-                    SingularLaw::Finite => {
-                        value += csf.asymptotics(p, omega);
-                        continue;
+                value += sing.finite_limit();
+                for (strength, c) in sing.divergences() {
+                    let coeff = w * c;
+                    match divergent.iter_mut().find(|(s, _, _)| *s == strength) {
+                        Some((_, sum, magnitude)) => {
+                            *sum += coeff;
+                            *magnitude += coeff.abs();
+                        }
+                        None => divergent.push((strength, coeff, coeff.abs())),
                     }
-                    SingularLaw::Power { a, c, l } => (a, c, l),
-                    SingularLaw::Log { c, l } => (0.0, c, l),
-                };
-                // Both c|ω-Ω_p|^{-a} and -c ln|ω-Ω_p| diverge towards sign(c) ∞
-                let coeff = w * c;
-                match divergent.iter_mut().find(|(r, _, _)| *r == rank) {
-                    Some((_, sum, magnitude)) => {
-                        *sum += coeff;
-                        *magnitude += coeff.abs();
-                    }
-                    None => divergent.push((rank, coeff, coeff.abs())),
                 }
-                value += l;
             }
             finite += w * value;
         }
 
-        // The strongest rank whose coefficients do not cancel fixes the value. The same
-        // relative tolerance decides a cancellation here as for the discrete weights.
+        // The strongest divergence whose coefficients do not cancel fixes the value. The
+        // same relative tolerance decides a cancellation here as for the discrete weights.
         match divergent
             .iter()
             .filter(|(_, sum, magnitude)| sum.abs() > DiscreteSF::WEIGHT_TOL * magnitude)
-            .max_by(|x, y| x.0.total_cmp(&y.0))
+            .max_by(|x, y| x.0.order(&y.0))
         {
             Some((_, sum, _)) => sum.signum() * f64::INFINITY,
-            // Every divergence has cancelled, leaving the l terms behind
+            // Every divergence has cancelled, leaving the finite limits behind
             None => finite,
         }
     }
@@ -283,7 +247,10 @@ impl SpectralFunction {
             .value;
 
             // Add integrals of the asymptotics
-            for (p, sing) in csf.singularities().iter().enumerate() {
+            for sing in csf.singularities() {
+                if sing.is_trivial() {
+                    continue;
+                }
                 // ∫S_p(ω)[f(ω) - f(Ω_p)]dω
                 let omega_p = sing.position;
                 let f_p = f(omega_p);
@@ -292,7 +259,7 @@ impl SpectralFunction {
                         if omega == omega_p {
                             0.0
                         } else {
-                            csf.asymptotics(p, omega) * (f(omega) - f_p)
+                            sing.value(omega) * (f(omega) - f_p)
                         }
                     },
                     omega_min,
@@ -301,7 +268,7 @@ impl SpectralFunction {
                 )?
                 .value;
                 // ∫S_p(ω)dω f(Ω_p)
-                res_contrib += csf.asympt_int(p) * f_p;
+                res_contrib += sing.integral(omega_min, omega_max) * f_p;
             }
 
             result += w * res_contrib;

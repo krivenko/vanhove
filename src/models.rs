@@ -1,8 +1,9 @@
 //! Model densities of states commonly used in physics.
 
 use crate::discrete::{DiscreteSF, Resonance};
+use crate::singularity::{AsymptTerm, Singularity};
 use crate::util::fermi;
-use crate::{ContinuousSF, SingularLaw, Singularity, SpectralFunction};
+use crate::{ContinuousSF, SpectralFunction};
 
 use special::Elliptic;
 use std::f64::consts::{PI, SQRT_2};
@@ -150,20 +151,17 @@ struct SemicircleDOS {
 impl SemicircleDOS {
     fn new(eps: f64, radius: f64) -> SemicircleDOS {
         assert!(radius > 0.0, "radius must be positive");
+        let prefactor = 2.0 / (PI * radius);
+        // \sqrt{2(1 \pm x)} = \sqrt{2/r} \sqrt{|ω-Ω_p|} for x = (ω-ε)/r
+        let c = prefactor * (2.0 / radius).sqrt();
         SemicircleDOS {
             eps,
             radius,
             edges: [
-                Singularity {
-                    position: eps - radius,
-                    law: SingularLaw::Finite,
-                },
-                Singularity {
-                    position: eps + radius,
-                    law: SingularLaw::Finite,
-                },
+                Singularity::new(eps - radius, vec![AsymptTerm::power(0.5, c)]),
+                Singularity::new(eps + radius, vec![AsymptTerm::power(0.5, c)]),
             ],
-            prefactor: 2.0 / (PI * radius),
+            prefactor,
         }
     }
 }
@@ -172,8 +170,11 @@ impl ContinuousSF for SemicircleDOS {
         (self.edges[0].position, self.edges[1].position)
     }
     fn regular(&self, omega: f64) -> f64 {
-        if omega == self.edges[0].position || omega == self.edges[1].position {
-            -2.0 * self.prefactor
+        // A(ω) and S_p(ω) both vanish at the edge Ω_p, leaving R(ω) = -S_{1-p}(ω) there
+        if omega == self.edges[0].position {
+            -self.edges[1].value(omega)
+        } else if omega == self.edges[1].position {
+            -self.edges[0].value(omega)
         } else {
             let x = (omega - self.eps) / self.radius;
             self.prefactor
@@ -182,16 +183,6 @@ impl ContinuousSF for SemicircleDOS {
     }
     fn singularities(&self) -> &[Singularity] {
         &self.edges
-    }
-    fn asymptotics(&self, p: usize, omega: f64) -> f64 {
-        debug_assert!(p <= 1);
-        let x = (omega - self.eps) / self.radius;
-        // p == 0 is the lower edge, p == 1 the upper one
-        let sign = if p == 0 { 1.0 } else { -1.0 };
-        self.prefactor * (2.0 * (1.0 + sign * x)).sqrt()
-    }
-    fn asympt_int(&self, _p: usize) -> f64 {
-        16.0 / (3.0 * PI)
     }
 }
 
@@ -216,7 +207,8 @@ struct PowerLawDOS {
     r: f64,
     /// Band edges.
     edges: [f64; 2],
-    singularity: [Singularity; 1],
+    /// Band edge singularity, absent for $r \geq 1$ where $A(\omega)$ is regular.
+    singularity: Box<[Singularity]>,
     prefactor: f64,
 }
 impl PowerLawDOS {
@@ -224,23 +216,17 @@ impl PowerLawDOS {
         assert!(r > -1.0, "asymptotics exponent must satisfy r > -1");
         assert!(w > 0.0, "bandwidth must be positive");
         let prefactor = (r + 1.0) / (w.powf(r + 1.0));
-        let sing_law = if r < 0.0 {
-            SingularLaw::Power {
-                a: -r,
-                c: prefactor,
-                l: 0.0,
-            }
+        // For r < 1 the whole of A(ω) is the singular part, R(ω) vanishing
+        let singularity = if r < 1.0 {
+            vec![Singularity::new(eps, vec![AsymptTerm::power(r, prefactor)])]
         } else {
-            SingularLaw::Finite
+            vec![]
         };
         PowerLawDOS {
             eps,
             r,
             edges: [eps, eps + w],
-            singularity: [Singularity {
-                position: eps,
-                law: sing_law,
-            }],
+            singularity: singularity.into_boxed_slice(),
             prefactor,
         }
     }
@@ -257,13 +243,6 @@ impl ContinuousSF for PowerLawDOS {
     }
     fn singularities(&self) -> &[Singularity] {
         &self.singularity
-    }
-    fn asymptotics(&self, p: usize, omega: f64) -> f64 {
-        debug_assert!(p == 0);
-        if self.r < 1.0 { self.value(omega) } else { 0.0 }
-    }
-    fn asympt_int(&self, _p: usize) -> f64 {
-        if self.r < 1.0 { 1.0 } else { 0.0 }
     }
 }
 
@@ -290,22 +269,27 @@ struct PseudogapDOS {
     r: f64,
     /// Band edges.
     edges: [f64; 2],
-    singularity: [Singularity; 1],
+    /// Pseudogap singularity, absent for $r \geq 1$ where $A(\omega)$ is regular.
+    singularity: Box<[Singularity]>,
     prefactor: f64,
 }
 impl PseudogapDOS {
     fn new(eps: f64, r: f64, d: f64) -> PseudogapDOS {
         assert!(r > 0.0, "asymptotics exponent must be positive");
         assert!(d > 0.0, "bandwidth must be positive");
+        let prefactor = (r + 1.0) / (2.0 * d.powf(r + 1.0));
+        // For r < 1 the whole of A(ω) is the singular part, R(ω) vanishing
+        let singularity = if r < 1.0 {
+            vec![Singularity::new(eps, vec![AsymptTerm::power(r, prefactor)])]
+        } else {
+            vec![]
+        };
         PseudogapDOS {
             eps,
             r,
             edges: [eps - d, eps + d],
-            singularity: [Singularity {
-                position: eps,
-                law: SingularLaw::Finite,
-            }],
-            prefactor: (r + 1.0) / (2.0 * d.powf(r + 1.0)),
+            singularity: singularity.into_boxed_slice(),
+            prefactor,
         }
     }
     fn value(&self, omega: f64) -> f64 {
@@ -321,13 +305,6 @@ impl ContinuousSF for PseudogapDOS {
     }
     fn singularities(&self) -> &[Singularity] {
         &self.singularity
-    }
-    fn asymptotics(&self, p: usize, omega: f64) -> f64 {
-        debug_assert!(p == 0);
-        if self.r < 1.0 { self.value(omega) } else { 0.0 }
-    }
-    fn asympt_int(&self, _p: usize) -> f64 {
-        if self.r < 1.0 { 1.0 } else { 0.0 }
     }
 }
 
@@ -360,25 +337,23 @@ struct ChainDOS {
 impl ChainDOS {
     fn new(eps: f64, t: f64) -> ChainDOS {
         assert!(t > 0.0, "hopping constant must be positive");
-        let law = SingularLaw::Power {
-            a: 0.5,
-            c: 1.0 / (2.0 * PI * t.sqrt()),
-            l: 0.0,
+        let prefactor = 1.0 / (2.0 * PI * t);
+        // 1/s + s/8 for s = \sqrt{2(1 \pm x)} = \sqrt{|ω-Ω_p|/t} and x = (ω-ε)/(2t).
+        // The second term leaves R(ω) with a bounded derivative at the edge.
+        let terms = || {
+            vec![
+                AsymptTerm::power(-0.5, prefactor * t.sqrt()),
+                AsymptTerm::power(0.5, prefactor / (8.0 * t.sqrt())),
+            ]
         };
         ChainDOS {
             eps,
             t,
             edges: [
-                Singularity {
-                    position: eps - 2.0 * t,
-                    law,
-                },
-                Singularity {
-                    position: eps + 2.0 * t,
-                    law,
-                },
+                Singularity::new(eps - 2.0 * t, terms()),
+                Singularity::new(eps + 2.0 * t, terms()),
             ],
-            prefactor: 1.0 / (2.0 * PI * t),
+            prefactor,
         }
     }
 }
@@ -387,36 +362,20 @@ impl ContinuousSF for ChainDOS {
         (self.edges[0].position, self.edges[1].position)
     }
     fn regular(&self, omega: f64) -> f64 {
-        if omega == self.edges[0].position || omega == self.edges[1].position {
-            -0.75 * self.prefactor
+        // A(ω) - S_p(ω) vanishes at the edge Ω_p, leaving R(ω) = -S_{1-p}(ω) there
+        if omega == self.edges[0].position {
+            -self.edges[1].value(omega)
+        } else if omega == self.edges[1].position {
+            -self.edges[0].value(omega)
         } else {
             let x = (omega - self.eps) / (2.0 * self.t);
-
-            // 'sm' regularizes the derivative near ω = -2t to ease integration
-            let rm = (2.0 * (1.0 + x)).sqrt();
-            let sm = self.prefactor * (1.0 / rm + rm / 8.0);
-
-            // 'sp' regularizes the derivative near ω = 2t to ease integration
-            let rp = (2.0 * (1.0 - x)).sqrt();
-            let sp = self.prefactor * (1.0 / rp + rp / 8.0);
-
-            self.prefactor / (1.0 - x * x).sqrt() - sp - sm
+            self.prefactor / (1.0 - x * x).sqrt()
+                - self.edges[0].value(omega)
+                - self.edges[1].value(omega)
         }
     }
     fn singularities(&self) -> &[Singularity] {
         &self.edges
-    }
-    fn asymptotics(&self, p: usize, omega: f64) -> f64 {
-        debug_assert!(p <= 1);
-        let x = (omega - self.eps) / (2.0 * self.t);
-        // p == 0 is the lower edge, p == 1 the upper one
-        let sign = if p == 0 { 1.0 } else { -1.0 };
-        let s = (2.0 * (1.0 + sign * x)).sqrt();
-        // The second term regularizes the derivative
-        self.prefactor * (1.0 / s + s / 8.0)
-    }
-    fn asympt_int(&self, _p: usize) -> f64 {
-        7.0 / (3.0 * PI)
     }
 }
 
@@ -445,8 +404,6 @@ struct BetheDOS {
     num_scale: f64,
     denom_scale: f64,
     prefactor: f64,
-    s_prefactor: f64,
-    s_int: f64,
 }
 impl BetheDOS {
     fn new(z: u32, eps: f64, t: f64) -> BetheDOS {
@@ -459,23 +416,18 @@ impl BetheDOS {
         let prefactor = sz1 / (PI * denom_scale);
         // Value of the denominator 1 - ((ω-ε)/(zt))^2 at the band edges
         let edge_denom = (1.0 - 2.0 / z).powi(2);
+        let s_prefactor = prefactor / edge_denom;
+        // \sqrt{2(1 \pm x)} = \sqrt{2/num_scale} \sqrt{|ω-Ω_p|} for x = (ω-ε)/num_scale
+        let c = s_prefactor * (2.0 / num_scale).sqrt();
         BetheDOS {
             eps,
             edges: [
-                Singularity {
-                    position: eps - num_scale,
-                    law: SingularLaw::Finite,
-                },
-                Singularity {
-                    position: eps + num_scale,
-                    law: SingularLaw::Finite,
-                },
+                Singularity::new(eps - num_scale, vec![AsymptTerm::power(0.5, c)]),
+                Singularity::new(eps + num_scale, vec![AsymptTerm::power(0.5, c)]),
             ],
             num_scale,
             denom_scale,
             prefactor,
-            s_prefactor: prefactor / edge_denom,
-            s_int: 16.0 / (3.0 * PI) * z * (z - 1.0) / (z - 2.0).powi(2),
         }
     }
 }
@@ -484,28 +436,22 @@ impl ContinuousSF for BetheDOS {
         (self.edges[0].position, self.edges[1].position)
     }
     fn regular(&self, omega: f64) -> f64 {
-        if omega == self.edges[0].position || omega == self.edges[1].position {
-            -2.0 * self.s_prefactor
+        // A(ω) and S_p(ω) both vanish at the edge Ω_p, leaving R(ω) = -S_{1-p}(ω) there
+        if omega == self.edges[0].position {
+            -self.edges[1].value(omega)
+        } else if omega == self.edges[1].position {
+            -self.edges[0].value(omega)
         } else {
             let domega = omega - self.eps;
             let x = domega / self.num_scale;
             let y = domega / self.denom_scale;
             self.prefactor * (1.0 - x * x).sqrt() / (1.0 - y * y)
-                - self.s_prefactor * ((2.0 * (1.0 - x)).sqrt() + (2.0 * (1.0 + x)).sqrt())
+                - self.edges[0].value(omega)
+                - self.edges[1].value(omega)
         }
     }
     fn singularities(&self) -> &[Singularity] {
         &self.edges
-    }
-    fn asymptotics(&self, p: usize, omega: f64) -> f64 {
-        debug_assert!(p <= 1);
-        let x = (omega - self.eps) / self.num_scale;
-        // p == 0 is the lower edge, p == 1 the upper one
-        let sign = if p == 0 { 1.0 } else { -1.0 };
-        self.s_prefactor * (2.0 * (1.0 + sign * x)).sqrt()
-    }
-    fn asympt_int(&self, _p: usize) -> f64 {
-        self.s_int
     }
 }
 
@@ -539,7 +485,7 @@ struct SquareDOS {
     t: f64,
     /// Band edges.
     edges: [f64; 2],
-    /// Position of the logarithmic van Hove singularity, which sits at the band center.
+    /// Logarithmic van Hove singularity, which sits at the band center.
     singularity: [Singularity; 1],
     prefactor: f64,
 }
@@ -556,13 +502,14 @@ impl SquareDOS {
             eps,
             t,
             edges: [eps - 4.0 * t, eps + 4.0 * t],
-            singularity: [Singularity {
-                position: eps,
-                law: SingularLaw::Log {
-                    c: prefactor,
-                    l: prefactor * (16.0 * t).ln(),
-                },
-            }],
+            // -c ln|ω-ε| + c ln(16t) = -c ln|(ω-ε)/(16t)|
+            singularity: [Singularity::new(
+                eps,
+                vec![
+                    AsymptTerm::log(prefactor),
+                    AsymptTerm::constant(prefactor * (16.0 * t).ln()),
+                ],
+            )],
             prefactor,
         }
     }
@@ -588,14 +535,6 @@ impl ContinuousSF for SquareDOS {
     }
     fn singularities(&self) -> &[Singularity] {
         &self.singularity
-    }
-    fn asymptotics(&self, p: usize, omega: f64) -> f64 {
-        debug_assert!(p == 0);
-        let x = (omega - self.eps) / (16.0 * self.t);
-        -self.prefactor * x.abs().ln()
-    }
-    fn asympt_int(&self, _p: usize) -> f64 {
-        4.0 / PI.powi(2) * (1.0 + 2.0 * std::f64::consts::LN_2)
     }
 }
 
@@ -642,13 +581,14 @@ impl TriangularDOS {
             eps,
             t,
             edges: [omega_min, omega_max],
-            singularity: [Singularity {
-                position: eps + 2.0 * t,
-                law: SingularLaw::Log {
-                    c: prefactor * 0.75,
-                    l: prefactor * 0.75 * (8.0 * t.abs()).ln(),
-                },
-            }],
+            // -c ln|ω-Ω| + c ln(8|t|) = -c ln|(ω-Ω)/(8t)|
+            singularity: [Singularity::new(
+                eps + 2.0 * t,
+                vec![
+                    AsymptTerm::log(prefactor * 0.75),
+                    AsymptTerm::constant(prefactor * 0.75 * (8.0 * t.abs()).ln()),
+                ],
+            )],
             prefactor,
         }
     }
@@ -686,14 +626,6 @@ impl ContinuousSF for TriangularDOS {
     }
     fn singularities(&self) -> &[Singularity] {
         &self.singularity
-    }
-    fn asymptotics(&self, p: usize, omega: f64) -> f64 {
-        debug_assert!(p == 0);
-        let x = (omega - self.singularity[0].position) / (8.0 * self.t);
-        -self.prefactor * 0.75 * x.abs().ln()
-    }
-    fn asympt_int(&self, _p: usize) -> f64 {
-        9.0 / (4.0 * PI.powi(2)) * (3.0 + std::f64::consts::LN_2)
     }
 }
 
@@ -753,25 +685,20 @@ impl HoneycombDOS {
     fn new(eps: f64, t: f64) -> HoneycombDOS {
         assert!(t > 0.0, "hopping constant must be positive");
         let prefactor = 1.0 / (PI.powi(2) * t);
+        let log_terms = || {
+            vec![
+                AsymptTerm::log(prefactor * 0.75),
+                AsymptTerm::constant(prefactor * 0.75 * (4.0 * t).ln()),
+            ]
+        };
         HoneycombDOS {
             eps,
             t,
             edges: [eps - 3.0 * t, eps + 3.0 * t],
+            // -c ln|ω-Ω_p| + c ln(4t) = -c ln|(ω-Ω_p)/(4t)|
             singularities: [
-                Singularity {
-                    position: eps - t,
-                    law: SingularLaw::Log {
-                        c: prefactor * 0.75,
-                        l: prefactor * 0.75 * (4.0 * t).ln(),
-                    },
-                },
-                Singularity {
-                    position: eps + t,
-                    law: SingularLaw::Log {
-                        c: prefactor * 0.75,
-                        l: prefactor * 0.75 * (4.0 * t).ln(),
-                    },
-                },
+                Singularity::new(eps - t, log_terms()),
+                Singularity::new(eps + t, log_terms()),
             ],
             prefactor,
         }
@@ -813,14 +740,6 @@ impl ContinuousSF for HoneycombDOS {
     }
     fn singularities(&self) -> &[Singularity] {
         &self.singularities
-    }
-    fn asymptotics(&self, p: usize, omega: f64) -> f64 {
-        debug_assert!(p <= 1);
-        let x = (omega - self.singularities[p].position) / (4.0 * self.t);
-        -self.prefactor * 0.75 * x.abs().ln()
-    }
-    fn asympt_int(&self, _p: usize) -> f64 {
-        (9.0 + 3.0 * std::f64::consts::LN_2) / (2.0 * PI.powi(2))
     }
 }
 
@@ -917,25 +836,20 @@ impl LiebDOS {
         assert!(t > 0.0, "hopping constant must be positive");
         let prefactor = 1.0 / (PI.powi(2) * t);
         let half_width = 2.0 * SQRT_2 * t;
+        let log_terms = || {
+            vec![
+                AsymptTerm::log(prefactor),
+                AsymptTerm::constant(prefactor * (2.0 * t).ln()),
+            ]
+        };
         LiebDOS {
             eps,
             t,
             edges: [eps - half_width, eps + half_width],
+            // -c ln|ω-Ω_p| + c ln(2t) = -c ln|(ω-Ω_p)/(2t)|
             singularities: [
-                Singularity {
-                    position: eps - 2.0 * t,
-                    law: SingularLaw::Log {
-                        c: prefactor,
-                        l: prefactor * (2.0 * t).ln(),
-                    },
-                },
-                Singularity {
-                    position: eps + 2.0 * t,
-                    law: SingularLaw::Log {
-                        c: prefactor,
-                        l: prefactor * (2.0 * t).ln(),
-                    },
-                },
+                Singularity::new(eps - 2.0 * t, log_terms()),
+                Singularity::new(eps + 2.0 * t, log_terms()),
             ],
             prefactor,
         }
@@ -968,14 +882,6 @@ impl ContinuousSF for LiebDOS {
     fn singularities(&self) -> &[Singularity] {
         &self.singularities
     }
-    fn asymptotics(&self, p: usize, omega: f64) -> f64 {
-        debug_assert!(p <= 1);
-        let x = (omega - self.singularities[p].position) / (2.0 * self.t);
-        -self.prefactor * x.abs().ln()
-    }
-    fn asympt_int(&self, _p: usize) -> f64 {
-        4.0 * (SQRT_2 - (1.0 + SQRT_2).ln()) / PI.powi(2)
-    }
 }
 
 /// Returns normalized density of states of the Lieb lattice.
@@ -1005,7 +911,8 @@ pub fn lieb(eps: f64, t: f64) -> SpectralFunction {
 
 #[cfg(test)]
 mod tests {
-    use crate::{SpectralFunction, models};
+    use super::*;
+    use crate::models;
     use approx::assert_relative_eq;
 
     fn compute_moment(dos: &SpectralFunction, order: i32) -> f64 {
@@ -1073,6 +980,64 @@ mod tests {
         for (order, moment_ref) in moments_ref.iter().enumerate() {
             let moment = compute_moment(&dos, order as i32);
             assert_relative_eq!(moment, moment_ref, max_relative = 1e-10);
+        }
+    }
+
+    /// Compare $\int S_p(\omega)d\omega$ of every singularity of `dos` against known
+    /// values, one per singularity.
+    fn check_asympt_int<C: ContinuousSF>(dos: &C, expected: &[f64]) {
+        let (omega_min, omega_max) = dos.support();
+        let singularities = dos.singularities();
+        assert_eq!(singularities.len(), expected.len());
+        for (sing, &e) in singularities.iter().zip(expected) {
+            assert_relative_eq!(sing.integral(omega_min, omega_max), e, max_relative = 1e-14);
+        }
+    }
+
+    #[test]
+    fn asympt_int() {
+        use std::f64::consts::{LN_2, PI, SQRT_2};
+
+        let (eps, t) = (0.5f64, 2.0f64);
+
+        check_asympt_int(&SemicircleDOS::new(eps, 2.0 * t), &[16.0 / (3.0 * PI); 2]);
+        check_asympt_int(&ChainDOS::new(eps, t), &[7.0 / (3.0 * PI); 2]);
+        for z in [3u32, 6, 50] {
+            let zf = f64::from(z);
+            let s = 16.0 / (3.0 * PI) * zf * (zf - 1.0) / (zf - 2.0).powi(2);
+            check_asympt_int(&BetheDOS::new(z, eps, t), &[s; 2]);
+        }
+        check_asympt_int(
+            &SquareDOS::new(eps, t),
+            &[4.0 / PI.powi(2) * (1.0 + 2.0 * LN_2)],
+        );
+        // The band edges swap places with the sign of t, leaving the integral unchanged
+        for t in [t, -0.7] {
+            check_asympt_int(
+                &TriangularDOS::new(eps, t),
+                &[9.0 / (4.0 * PI.powi(2)) * (3.0 + LN_2)],
+            );
+        }
+        check_asympt_int(
+            &HoneycombDOS::new(eps, t),
+            &[(9.0 + 3.0 * LN_2) / (2.0 * PI.powi(2)); 2],
+        );
+        check_asympt_int(
+            &LiebDOS::new(eps, t),
+            &[4.0 * (SQRT_2 - (1.0 + SQRT_2).ln()) / PI.powi(2); 2],
+        );
+
+        // For r < 1 the singular part carries the whole unit weight of A(ω), while for
+        // r >= 1 there is no singularity left to integrate
+        for r in [-0.5f64, 0.0, 0.5] {
+            check_asympt_int(&PowerLawDOS::new(eps, r, 2.0), &[1.0]);
+        }
+        for r in [0.5f64, 0.9] {
+            check_asympt_int(&PseudogapDOS::new(eps, r, 2.0), &[1.0]);
+        }
+        for r in [1.0f64, 2.5] {
+            check_asympt_int(&PowerLawDOS::new(eps, r, 2.0), &[]);
+            check_asympt_int(&PseudogapDOS::new(eps, r, 2.0), &[]);
         }
     }
 
@@ -1283,9 +1248,6 @@ mod tests {
 
     #[test]
     fn square_regular_near_singularity() {
-        use crate::ContinuousSF;
-        use crate::models::SquareDOS;
-
         let (eps, t) = (0.5f64, 2.0f64);
         let dos = SquareDOS::new(eps, t);
         let prefactor = 1.0 / (2.0 * std::f64::consts::PI.powi(2) * t);
@@ -1349,9 +1311,6 @@ mod tests {
 
     #[test]
     fn triangular_regular_near_singularity() {
-        use crate::ContinuousSF;
-        use crate::models::TriangularDOS;
-
         let (eps, t) = (0.5f64, 2.0f64);
         let dos = TriangularDOS::new(eps, t);
         let prefactor = 1.0 / (std::f64::consts::PI.powi(2) * t);
@@ -1406,9 +1365,6 @@ mod tests {
 
     #[test]
     fn honeycomb_regular_near_singularity() {
-        use crate::ContinuousSF;
-        use crate::models::HoneycombDOS;
-
         let (eps, t) = (0.5f64, 2.0f64);
         let dos = HoneycombDOS::new(eps, t);
         let prefactor = 1.0 / (std::f64::consts::PI.powi(2) * t);
@@ -1531,7 +1487,7 @@ mod tests {
         assert_relative_eq!(dos.continuous_at(eps), 0.0, epsilon = 1e-15);
 
         // Being those of a two-dimensional band minimum, the band edges are steps of
-        // height K(0)|ω-ε|/(3π^2t^2) = √2/(3πt) rather than zeros
+        // height K(0)|ω-ε|/(3π^2t^2) = \sqrt{2}/(3πt) rather than zeros
         for omega_e in [eps - half_width, eps + half_width] {
             assert_relative_eq!(
                 dos.continuous_at(omega_e),
@@ -1549,9 +1505,6 @@ mod tests {
 
     #[test]
     fn lieb_regular_near_singularity() {
-        use crate::ContinuousSF;
-        use crate::models::LiebDOS;
-
         let (eps, t) = (0.5f64, 2.0f64);
         let dos = LiebDOS::new(eps, t);
         let prefactor = 1.0 / (std::f64::consts::PI.powi(2) * t);
