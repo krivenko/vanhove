@@ -49,8 +49,8 @@ The numerical work is delegated to the
 | `lieb(eps, t)`              | Lieb lattice, flat band $\delta$-peak at the band center            |
 
 Every model is normalized to unit spectral weight. They can be scaled by real
-numbers and added together, so mixed discrete/continuous spectra are built by
-simple arithmetic.
+numbers, negated, added and subtracted, so mixed discrete/continuous spectra are
+built by simple arithmetic.
 
 ## Usage
 

@@ -1,6 +1,6 @@
 //! Discrete spectral function.
 
-use std::ops::{Add, Mul};
+use std::ops::{Add, Mul, Neg, Sub};
 
 use crate::util;
 
@@ -113,6 +113,22 @@ impl Mul<DiscreteSF> for f64 {
     type Output = DiscreteSF;
     fn mul(self, sf: DiscreteSF) -> DiscreteSF {
         sf * self
+    }
+}
+
+/// Negation of a discrete spectral function.
+impl Neg for DiscreteSF {
+    type Output = Self;
+    fn neg(self) -> DiscreteSF {
+        self * (-1.0)
+    }
+}
+
+/// Subtraction of two discrete spectral functions.
+impl Sub for DiscreteSF {
+    type Output = Self;
+    fn sub(self, rhs: Self) -> Self {
+        self + (-rhs)
     }
 }
 
@@ -321,6 +337,47 @@ mod tests {
             DiscreteSF::one_resonance(-0.0, 1.0).find(0.0).unwrap().eps,
             0.0
         );
+    }
+
+    #[test]
+    fn neg() {
+        let sf = DiscreteSF::one_resonance(2.0, 1.0) + DiscreteSF::one_resonance(-1.5, 0.25);
+        let neg_sf = -sf.clone();
+
+        // Negation flips the sign of every weight while preserving the positions
+        assert_eq!(neg_sf.len(), 2);
+        assert_eq!(neg_sf.support(), sf.support());
+        assert_eq!(neg_sf.resonances()[0].weight, -0.25);
+        assert_eq!(neg_sf.resonances()[1].weight, -1.0);
+        assert_eq!(neg_sf.total_weight(), -sf.total_weight());
+
+        // Negating twice is the identity
+        assert_eq!((-neg_sf).total_weight(), sf.total_weight());
+
+        // Negation of an empty spectral function is empty
+        assert!((-DiscreteSF::new()).is_empty());
+    }
+
+    #[test]
+    fn sub() {
+        let sf = DiscreteSF::one_resonance(2.0, 1.0) + DiscreteSF::one_resonance(-1.5, 0.25);
+
+        // Resonances sharing a position have their weights subtracted
+        let diff = sf.clone() - DiscreteSF::one_resonance(2.0, 0.75);
+        assert_eq!(diff.len(), 2);
+        assert_relative_eq!(diff.find(2.0).unwrap().weight, 0.25, epsilon = 1e-15);
+        assert_eq!(diff.find(-1.5).unwrap().weight, 0.25);
+
+        // Resonances absent from the left operand enter with a negative weight
+        let diff = sf.clone() - DiscreteSF::one_resonance(4.0, 0.5);
+        assert_eq!(diff.len(), 3);
+        assert_eq!(diff.find(4.0).unwrap().weight, -0.5);
+        assert_relative_eq!(diff.total_weight(), 0.75, epsilon = 1e-15);
+
+        // A spectral function subtracted from itself cancels out exactly
+        let zero = sf.clone() - sf;
+        assert!(zero.is_empty());
+        assert_eq!(zero.total_weight(), 0.0);
     }
 
     #[test]

@@ -7,7 +7,7 @@ pub mod models;
 mod util;
 
 use std::f64::consts::PI;
-use std::ops::{Add, Mul, Neg};
+use std::ops::{Add, Mul, Neg, Sub};
 use std::rc::Rc;
 
 use bilby::QuadratureError;
@@ -109,7 +109,7 @@ impl Mul<SpectralFunction> for f64 {
         sf * self
     }
 }
-/// Multiply spectral function by -1.
+/// Negation of a spectral function.
 impl Neg for SpectralFunction {
     type Output = Self;
     fn neg(self) -> SpectralFunction {
@@ -127,6 +127,13 @@ impl Add for SpectralFunction {
             discrete: self.discrete + rhs.discrete,
             continuous,
         }
+    }
+}
+/// Subtraction of two spectral functions.
+impl Sub for SpectralFunction {
+    type Output = Self;
+    fn sub(self, rhs: SpectralFunction) -> SpectralFunction {
+        self + (-rhs)
     }
 }
 impl SpectralFunction {
@@ -499,6 +506,48 @@ mod tests {
 
         // A spectral function and its negation cancel each other out
         let zero = dos.clone() + (-dos);
+        assert!(zero.discrete.is_empty());
+        assert_relative_eq!(zero.total_weight(), 0.0, epsilon = 1e-12);
+        assert_eq!(zero.continuous_at(1.4), 0.0);
+    }
+
+    #[test]
+    fn sub() {
+        let dos = 2.0 * discrete(&[-0.7, 1.2], &[0.25, 0.6]) + 5.0 * gaussian(1.4, 0.5);
+        let rhs = discrete(&[1.2], &[1.0]) + 2.0 * gaussian(1.4, 0.5);
+        let diff = dos.clone() - rhs.clone();
+
+        // Subtraction acts on the discrete and the continuous parts alike
+        assert_eq!(diff.discrete.len(), 2);
+        assert_relative_eq!(
+            diff.discrete().find(1.2).unwrap().weight,
+            0.2,
+            epsilon = 1e-12
+        );
+        assert_relative_eq!(
+            diff.total_weight(),
+            dos.total_weight() - rhs.total_weight(),
+            epsilon = 1e-12
+        );
+        for omega in [-1.0, 0.5, 1.4, 3.0] {
+            assert_relative_eq!(
+                diff.continuous_at(omega),
+                dos.continuous_at(omega) - rhs.continuous_at(omega),
+                max_relative = 1e-12
+            );
+        }
+
+        // Subtraction agrees with adding the negation
+        let diff2 = dos.clone() + (-rhs);
+        assert_relative_eq!(diff2.total_weight(), diff.total_weight(), epsilon = 1e-12);
+        assert_relative_eq!(
+            diff2.continuous_at(0.5),
+            diff.continuous_at(0.5),
+            max_relative = 1e-12
+        );
+
+        // A spectral function subtracted from itself cancels out
+        let zero = dos.clone() - dos;
         assert!(zero.discrete.is_empty());
         assert_relative_eq!(zero.total_weight(), 0.0, epsilon = 1e-12);
         assert_eq!(zero.continuous_at(1.4), 0.0);

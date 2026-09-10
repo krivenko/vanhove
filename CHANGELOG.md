@@ -6,7 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
-- Unary minus for `SpectralFunction`.
+- Unary minus and subtraction for `SpectralFunction` and `DiscreteSF`.
 - `models::bethe()`, density of states of a Bethe lattice with a finite coordination
   number.
 
