@@ -5,6 +5,62 @@ use bilby::{
     integrate_semi_infinite_lower, integrate_semi_infinite_upper,
 };
 
+/// Dispatch for the power function $u^r$ with a fixed exponent `r`.
+///
+/// `powf()` costs an order of magnitude more than `sqrt()`, which is worth avoiding
+/// when the same exponent is reused, as in a quadrature integrand.
+#[allow(dead_code)]
+#[derive(Debug, Clone, Copy)]
+pub enum PowKind {
+    /// $u^0 = 1$.
+    One,
+    /// $u^1 = u$.
+    Identity,
+    /// $u^{1/2}$.
+    Sqrt,
+    /// $u^{-1/2}$.
+    InvSqrt,
+    /// $u^n$ through `powi()`.
+    Powi(i32),
+    /// $u^r$ through `powf()`.
+    Powf(f64),
+}
+
+#[allow(dead_code)]
+impl PowKind {
+    /// Largest integer exponent still handled by `powi()`.
+    const MAX_INT_EXPONENT: f64 = 32.0;
+
+    /// Dispatch to use for the exponent `r`.
+    pub fn of(r: f64) -> PowKind {
+        if r == 0.0 {
+            PowKind::One
+        } else if r == 1.0 {
+            PowKind::Identity
+        } else if r == 0.5 {
+            PowKind::Sqrt
+        } else if r == -0.5 {
+            PowKind::InvSqrt
+        } else if r.fract() == 0.0 && r.abs() <= Self::MAX_INT_EXPONENT {
+            PowKind::Powi(r as i32)
+        } else {
+            PowKind::Powf(r)
+        }
+    }
+
+    /// $u^r$ for $u \geq 0$, agreeing with `powf()` down to $u = 0$.
+    pub fn eval(&self, u: f64) -> f64 {
+        match *self {
+            PowKind::One => 1.0,
+            PowKind::Identity => u,
+            PowKind::Sqrt => u.sqrt(),
+            PowKind::InvSqrt => 1.0 / u.sqrt(),
+            PowKind::Powi(n) => u.powi(n),
+            PowKind::Powf(r) => u.powf(r),
+        }
+    }
+}
+
 /// Kahan-Babuška-Neumaier summation algorithm.
 pub fn kahan_babushka_neumaier_sum<I: Iterator<Item = f64>>(input: I) -> f64 {
     let (mut sum, mut c) = (0.0f64, 0.0f64);
@@ -59,7 +115,7 @@ pub fn fermi(x: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use crate::util;
-    use approx::assert_abs_diff_eq;
+    use approx::{assert_abs_diff_eq, assert_relative_eq};
 
     #[test]
     fn kahan_babushka_neumaier_sum() {
@@ -75,6 +131,32 @@ mod tests {
         // return 0, while the compensated sum is exact.
         let v = vec![1.0f64, 1e100, 1.0, -1e100];
         assert_eq!(util::kahan_babushka_neumaier_sum(v.into_iter()), 2.0);
+    }
+
+    #[test]
+    fn pow_kind() {
+        use util::PowKind;
+
+        // Every shortcut agrees with powf() to within a few ulps. It is not bitwise
+        // agreement: powi() multiplies repeatedly and InvSqrt rounds twice, while
+        // powf() is correctly rounded.
+        for r in [0.0f64, 1.0, 0.5, -0.5, 3.0, -7.0, 4.0, 2.5, -0.25] {
+            let kind = PowKind::of(r);
+            for u in [0.0f64, 1e-8, 0.25, 1.0, 7.5] {
+                assert_relative_eq!(kind.eval(u), u.powf(r), max_relative = 1e-14);
+            }
+        }
+
+        // u^0 is one everywhere, u^1 the identity
+        assert_eq!(PowKind::of(0.0).eval(0.0), 1.0);
+        assert_eq!(PowKind::of(1.0).eval(0.0), 0.0);
+
+        // A negative exponent diverges at the origin
+        assert_eq!(PowKind::of(-0.5).eval(0.0), f64::INFINITY);
+
+        // Integer exponents beyond the powi() range fall back on powf()
+        assert!(matches!(PowKind::of(32.0), PowKind::Powi(32)));
+        assert!(matches!(PowKind::of(33.0), PowKind::Powf(_)));
     }
 
     #[test]
