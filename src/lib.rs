@@ -3,6 +3,7 @@
 #![warn(missing_docs)]
 
 pub mod discrete;
+mod interp;
 pub mod models;
 mod singularity;
 mod util;
@@ -15,6 +16,7 @@ use bilby::QuadratureError;
 use num_complex::Complex64;
 
 use crate::discrete::DiscreteSF;
+use crate::interp::Interpolated;
 use crate::singularity::{Singularity, Strength};
 
 //
@@ -43,6 +45,10 @@ trait ContinuousSF: Send + Sync {
     fn regular(&self, omega: f64) -> f64;
     /// Singular points $\Omega_p$ along with the closed form of $S_p$ at each.
     fn singularities(&self) -> &[Singularity] {
+        &[]
+    }
+    /// Frequencies where $R(\omega)$ is not smooth, beyond the singular points.
+    fn breakpoints(&self) -> &[f64] {
         &[]
     }
 }
@@ -169,6 +175,34 @@ impl SpectralFunction {
             .map(|(cd, _)| cd.support())
             .chain(self.discrete.support())
             .reduce(|hull, sup| (hull.0.min(sup.0), hull.1.max(sup.1)))
+    }
+
+    /// Replace the regular part of every continuous contribution with a Chebyshev
+    /// interpolation of it.
+    ///
+    /// The singular parts are carried over exactly, so the result departs from the
+    /// original in $R(\omega)$ alone, and only within the relative tolerance `tol` of
+    /// the fit. It pays for itself when one spectral function is integrated many times
+    /// over and its regular part is expensive, as for the lattice models built on an
+    /// elliptic integral.
+    ///
+    /// Contributions of unbounded support are left as they are, there being no
+    /// interval to expand them over.
+    pub fn precomputed(&self, tol: Option<f64>) -> SpectralFunction {
+        let continuous = self
+            .continuous
+            .iter()
+            .map(|(csf, w)| {
+                let support = csf.support();
+                if support.0.is_finite() && support.1.is_finite() {
+                    let interpolated = Interpolated::new(csf.as_ref(), tol);
+                    (Arc::new(interpolated) as Arc<dyn ContinuousSF>, *w)
+                } else {
+                    (Arc::clone(csf), *w)
+                }
+            })
+            .collect();
+        SpectralFunction::from_discrete_continuous(self.discrete.clone(), continuous)
     }
 
     /// Total spectral weight.
@@ -343,7 +377,7 @@ impl SpectralFunction {
 #[cfg(test)]
 mod tests {
     use crate::SpectralFunction;
-    use crate::models::{chain, discrete, gaussian, semicircle, square};
+    use crate::models::{chain, discrete, gaussian, honeycomb, lieb, semicircle, square};
     use approx::assert_relative_eq;
     use std::f64::consts::PI;
 
@@ -588,6 +622,66 @@ mod tests {
         assert!(zero.discrete.is_empty());
         assert_relative_eq!(zero.total_weight(), 0.0, epsilon = 1e-12);
         assert_eq!(zero.continuous_at(1.4), 0.0);
+    }
+
+    #[test]
+    fn precomputed() {
+        let dos = square(0.0, 1.0);
+        let fast = dos.precomputed(None);
+
+        assert_eq!(fast.support(), dos.support());
+        assert_relative_eq!(fast.total_weight(), dos.total_weight(), epsilon = 1e-14);
+
+        // The singular part is carried over as it stands, divergence included
+        assert_eq!(fast.continuous_at(0.0), f64::INFINITY);
+
+        // Away from the singular point the expansion stands in for A(ω)
+        for omega in [-3.5, -1.2, 0.3, 2.0, 3.9] {
+            assert_relative_eq!(
+                fast.continuous_at(omega),
+                dos.continuous_at(omega),
+                max_relative = 1e-10
+            );
+        }
+
+        // Moments of even order survive the substitution, the odd ones vanishing
+        for order in [0, 2, 4] {
+            assert_relative_eq!(
+                fast.integrate(|omega| omega.powi(order), None).unwrap(),
+                dos.integrate(|omega| omega.powi(order), None).unwrap(),
+                max_relative = 1e-10
+            );
+        }
+
+        // An unbounded contribution has no interval to expand over and is left alone
+        let g = gaussian(1.4, 0.5);
+        let fast_g = g.precomputed(None);
+        for omega in [0.0, 1.4, 3.0] {
+            assert_eq!(fast_g.continuous_at(omega), g.continuous_at(omega));
+        }
+
+        // A band centre that is no singular point still breaks a panel, without which
+        // the kink there would cap the fit five orders short
+        for dos in [honeycomb(0.0, 1.0), lieb(0.0, 1.0)] {
+            let fast = dos.precomputed(None);
+            let (lo, hi) = dos.support().unwrap();
+            let (mut worst, mut peak) = (0.0f64, 0.0f64);
+            for i in 1..500 {
+                let omega = lo + (hi - lo) * (i as f64) / 500.0;
+                let (a, b) = (dos.continuous_at(omega), fast.continuous_at(omega));
+                if a.is_finite() && b.is_finite() {
+                    worst = worst.max((b - a).abs());
+                    peak = peak.max(a.abs());
+                }
+            }
+            assert!(worst < 1e-7 * peak, "fit stalled at {:.2e}", worst / peak);
+        }
+
+        // The discrete part passes through untouched
+        let mixed = 0.5 * square(0.0, 1.0) + 0.5 * discrete(&[3.0], &[1.0]);
+        let fast_mixed = mixed.precomputed(None);
+        assert_eq!(fast_mixed.discrete().len(), 1);
+        assert_relative_eq!(fast_mixed.total_weight(), 1.0, epsilon = 1e-14);
     }
 
     #[test]

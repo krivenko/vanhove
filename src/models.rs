@@ -322,6 +322,10 @@ impl ContinuousSF for PseudogapDOS {
     fn singularities(&self) -> &[Singularity] {
         &self.singularity
     }
+    fn breakpoints(&self) -> &[f64] {
+        // R(ω) reaches the band centre through |ω-ε| and kinks there
+        std::slice::from_ref(&self.eps)
+    }
 }
 
 /// Returns normalized density of states with a pseudogap.
@@ -744,6 +748,10 @@ impl ContinuousSF for HoneycombDOS {
     fn singularities(&self) -> &[Singularity] {
         &self.singularities
     }
+    fn breakpoints(&self) -> &[f64] {
+        // R(ω) reaches the band centre through |ω-ε| and kinks there
+        std::slice::from_ref(&self.eps)
+    }
 }
 
 /// Returns normalized density of states of a honeycomb lattice.
@@ -879,6 +887,10 @@ impl ContinuousSF for LiebDOS {
     fn singularities(&self) -> &[Singularity] {
         &self.singularities
     }
+    fn breakpoints(&self) -> &[f64] {
+        // R(ω) reaches the band centre through |ω-ε| and kinks there
+        std::slice::from_ref(&self.eps)
+    }
 }
 
 /// Returns normalized density of states of the Lieb lattice.
@@ -989,6 +1001,23 @@ mod tests {
         for (sing, &e) in singularities.iter().zip(expected) {
             assert_relative_eq!(sing.integral(omega_min, omega_max), e, max_relative = 1e-14);
         }
+    }
+
+    #[test]
+    fn breakpoints() {
+        let eps = 0.5f64;
+
+        // R(ω) of these models reaches the band centre through |ω-ε| and kinks there,
+        // which no singularity of theirs describes
+        assert_eq!(HoneycombDOS::new(eps, 2.0).breakpoints(), &[eps]);
+        assert_eq!(LiebDOS::new(eps, 2.0).breakpoints(), &[eps]);
+        assert_eq!(PseudogapDOS::new(eps, 2.5, 2.0).breakpoints(), &[eps]);
+
+        // Models whose kinks sit at a singular point or a band edge report none
+        assert!(ChainDOS::new(eps, 2.0).breakpoints().is_empty());
+        assert!(SquareDOS::new(eps, 2.0).breakpoints().is_empty());
+        assert!(TriangularDOS::new(eps, 2.0).breakpoints().is_empty());
+        assert!(SemicircleDOS::new(eps, 2.0).breakpoints().is_empty());
     }
 
     #[test]
