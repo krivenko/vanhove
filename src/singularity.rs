@@ -118,15 +118,12 @@ pub struct Singularity {
     pub position: f64,
     /// Terms of $S_p(\omega)$.
     terms: Box<[AsymptTerm]>,
-    /// Whether any term carries a logarithmic factor.
-    has_log: bool,
 }
 
 impl Singularity {
     pub fn new(position: f64, terms: Vec<AsymptTerm>) -> Singularity {
         Singularity {
             position,
-            has_log: terms.iter().any(|t| t.log_power > 0),
             terms: terms.into_boxed_slice(),
         }
     }
@@ -141,7 +138,7 @@ impl Singularity {
     /// Diverges at $\Omega_p$ unless every term stays bounded there.
     pub fn value(&self, omega: f64) -> f64 {
         let u = (omega - self.position).abs();
-        let ln_u = if self.has_log { u.ln() } else { 0.0 };
+        let ln_u = u.ln();
         self.terms.iter().map(|t| t.value(u, ln_u)).sum()
     }
 
