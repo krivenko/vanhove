@@ -7,7 +7,7 @@ use crate::{ContinuousSF, SpectralFunction};
 
 use special::Elliptic;
 use std::f64::consts::{PI, SQRT_2};
-use std::rc::Rc;
+use std::sync::Arc;
 
 //
 // Discrete DOS
@@ -805,7 +805,7 @@ pub fn kagome(eps: f64, t: f64) -> SpectralFunction {
     assert!(t != 0.0, "hopping constant must be non-zero");
     SpectralFunction::from_discrete_continuous(
         DiscreteSF::one_resonance(eps - 2.0 * t, 1.0 / 3.0),
-        vec![(Rc::new(HoneycombDOS::new(eps + t, t.abs())), 2.0 / 3.0)],
+        vec![(Arc::new(HoneycombDOS::new(eps + t, t.abs())), 2.0 / 3.0)],
     )
 }
 
@@ -902,7 +902,7 @@ impl ContinuousSF for LiebDOS {
 pub fn lieb(eps: f64, t: f64) -> SpectralFunction {
     SpectralFunction::from_discrete_continuous(
         DiscreteSF::one_resonance(eps, 1.0 / 3.0),
-        vec![(Rc::new(LiebDOS::new(eps, t)), 2.0 / 3.0)],
+        vec![(Arc::new(LiebDOS::new(eps, t)), 2.0 / 3.0)],
     )
 }
 
