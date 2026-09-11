@@ -4,8 +4,8 @@ use std::cmp::Ordering;
 
 use crate::util::PowKind;
 
-/// One term of the singular part,
-/// $c|\omega - \Omega_p|^r \ln^m|\omega - \Omega_p|$.
+/// One term of the singular part, $c u^r \ln^m u$, in terms of the scaled distance
+/// $u = |\omega - \Omega_p| / s$.
 #[derive(Debug, Clone, Copy)]
 pub struct AsymptTerm {
     /// Exponent $r > -1$.
@@ -14,24 +14,19 @@ pub struct AsymptTerm {
     log_power: u8,
     /// Coefficient $c$.
     c: f64,
-    /// Precomputed dispatch for $|\omega - \Omega_p|^r$.
+    /// Precomputed dispatch for $u^r$.
     pow: PowKind,
 }
 
 impl AsymptTerm {
-    /// $c|\omega - \Omega_p|^r$.
+    /// $c u^r$.
     pub fn power(exponent: f64, c: f64) -> AsymptTerm {
         AsymptTerm::make(exponent, 0, c)
     }
 
-    /// $-c\ln|\omega - \Omega_p|$, so that $c > 0$ describes a peak.
+    /// $-c\ln u$, so that $c > 0$ describes a peak.
     pub fn log(c: f64) -> AsymptTerm {
         AsymptTerm::make(0.0, 1, -c)
-    }
-
-    /// Constant $c$.
-    pub fn constant(c: f64) -> AsymptTerm {
-        AsymptTerm::make(0.0, 0, c)
     }
 
     fn make(exponent: f64, log_power: u8, c: f64) -> AsymptTerm {
@@ -49,13 +44,13 @@ impl AsymptTerm {
         }
     }
 
-    /// Value of the term at $u = |\omega - \Omega_p|$, given $\ln u$.
+    /// Value of the term at $u$, given $\ln u$.
     fn value(&self, u: f64, ln_u: f64) -> f64 {
         let v = self.c * self.pow.eval(u);
         if self.log_power == 0 { v } else { v * ln_u }
     }
 
-    /// Integral of the term over one side of $\Omega_p$ of length `l`,
+    /// Integral of the term over one side of $\Omega_p$ of length `l` in units of $u$,
     /// $\int_0^l c u^r \ln^m u\\, du$.
     fn half_integral(&self, l: f64) -> f64 {
         // The side is empty when Ω_p sits at that end of the support
@@ -109,21 +104,32 @@ impl Strength {
 ///
 /// The singular part is given in closed form over the whole support as
 /// $$
-///     S_p(\omega) = \sum_k c_k |\omega-\Omega_p|^{r_k}
-///         \ln^{m_k}|\omega-\Omega_p|.
+///     S_p(\omega) = \sum_k c_k u^{r_k} \ln^{m_k} u, \qquad
+///     u = \frac{|\omega-\Omega_p|}{s}.
 /// $$
+/// Measuring the distance to $\Omega_p$ in units of a scale $s$ keeps the coefficients
+/// free of fractional powers of $s$ and the logarithms dimensionless.
 #[derive(Debug, Clone)]
 pub struct Singularity {
     /// Position of the singular point, $\Omega_p$.
     pub position: f64,
+    /// Reciprocal of the scale $s$, stored in this form to keep `value()` free of
+    /// division.
+    inv_scale: f64,
     /// Terms of $S_p(\omega)$.
     terms: Box<[AsymptTerm]>,
 }
 
 impl Singularity {
-    pub fn new(position: f64, terms: Vec<AsymptTerm>) -> Singularity {
+    /// `scale` is the positive length $s$ the distance to $\Omega_p$ is measured in.
+    pub fn new(position: f64, scale: f64, terms: Vec<AsymptTerm>) -> Singularity {
+        assert!(
+            scale > 0.0 && scale.is_finite(),
+            "singularity scale must be positive and finite"
+        );
         Singularity {
             position,
+            inv_scale: 1.0 / scale,
             terms: terms.into_boxed_slice(),
         }
     }
@@ -137,7 +143,7 @@ impl Singularity {
     ///
     /// Diverges at $\Omega_p$ unless every term stays bounded there.
     pub fn value(&self, omega: f64) -> f64 {
-        let u = (omega - self.position).abs();
+        let u = (omega - self.position).abs() * self.inv_scale;
         let ln_u = u.ln();
         self.terms.iter().map(|t| t.value(u, ln_u)).sum()
     }
@@ -151,22 +157,33 @@ impl Singularity {
             omega_min.is_finite() && omega_max.is_finite(),
             "a spectral function with singularities must have a bounded support"
         );
-        let (below, above) = (self.position - omega_min, omega_max - self.position);
+        let below = (self.position - omega_min) * self.inv_scale;
+        let above = (omega_max - self.position) * self.inv_scale;
         debug_assert!(below >= 0.0 && above >= 0.0, "Ω_p lies outside the support");
+        // The half-integrals are taken over u, and dω = s du restores the scale
         self.terms
             .iter()
             .map(|t| t.half_integral(below) + t.half_integral(above))
-            .sum()
+            .sum::<f64>()
+            / self.inv_scale
     }
 
     /// Limit of $S_p(\omega)$ at $\Omega_p$ with every divergent term dropped.
     ///
-    /// Only the constant terms survive, the ones with $r > 0$ vanishing.
+    /// The constant terms survive as they stand and each logarithm leaves $-c\ln s$
+    /// behind, the terms with $r > 0$ vanishing.
     pub fn finite_limit(&self) -> f64 {
+        let ln_inv_scale = self.inv_scale.ln();
         self.terms
             .iter()
-            .filter(|t| t.exponent == 0.0 && t.log_power == 0)
-            .map(|t| t.c)
+            .filter(|t| t.exponent == 0.0)
+            .map(|t| {
+                if t.log_power == 0 {
+                    t.c
+                } else {
+                    t.c * ln_inv_scale
+                }
+            })
             .sum()
     }
 
@@ -195,10 +212,11 @@ mod tests {
         // S(ω) = 2|ω-1|^{-1/2} - 3 ln|ω-1| + 0.5 + 4|ω-1|^{3/2}
         let sing = Singularity::new(
             1.0,
+            1.0,
             vec![
                 AsymptTerm::power(-0.5, 2.0),
                 AsymptTerm::log(3.0),
-                AsymptTerm::constant(0.5),
+                AsymptTerm::power(0.0, 0.5),
                 AsymptTerm::power(1.5, 4.0),
             ],
         );
@@ -214,7 +232,7 @@ mod tests {
         assert_eq!(sing.value(1.0), f64::INFINITY);
 
         // A logarithm alone diverges downwards for a negative coefficient
-        let peak = Singularity::new(0.0, vec![AsymptTerm::log(-1.0)]);
+        let peak = Singularity::new(0.0, 1.0, vec![AsymptTerm::log(-1.0)]);
         assert_eq!(peak.value(0.0), f64::NEG_INFINITY);
     }
 
@@ -222,7 +240,7 @@ mod tests {
     fn integral() {
         // ∫_0^l u^r du = l^{r+1}/(r+1) on a support with Ω_p at the lower end
         for r in [-0.5f64, 0.0, 0.5, 2.0] {
-            let sing = Singularity::new(1.0, vec![AsymptTerm::power(r, 3.0)]);
+            let sing = Singularity::new(1.0, 1.0, vec![AsymptTerm::power(r, 3.0)]);
             let l = 2.0f64;
             assert_relative_eq!(
                 sing.integral(1.0, 1.0 + l),
@@ -233,7 +251,7 @@ mod tests {
 
         // ∫_0^l u^r ln u du = l^{r+1}[ln(l)/(r+1) - 1/(r+1)^2], written here for the
         // -c ln u convention of `AsymptTerm::log()`
-        let sing = Singularity::new(0.0, vec![AsymptTerm::log(1.0)]);
+        let sing = Singularity::new(0.0, 1.0, vec![AsymptTerm::log(1.0)]);
         let l = 4.0f64;
         assert_relative_eq!(
             sing.integral(0.0, l),
@@ -249,7 +267,7 @@ mod tests {
         );
 
         // An empty term list integrates to zero over any support, unbounded included
-        let trivial = Singularity::new(0.0, vec![]);
+        let trivial = Singularity::new(0.0, 1.0, vec![]);
         assert!(trivial.is_trivial());
         assert_eq!(trivial.integral(f64::NEG_INFINITY, f64::INFINITY), 0.0);
     }
@@ -259,10 +277,11 @@ mod tests {
         // The closed form agrees with adaptive quadrature of S_p itself
         let sing = Singularity::new(
             0.5,
+            1.0,
             vec![
                 AsymptTerm::power(-0.5, 1.5),
                 AsymptTerm::log(0.75),
-                AsymptTerm::constant(-0.25),
+                AsymptTerm::power(0.0, -0.25),
                 AsymptTerm::power(0.5, 2.0),
             ],
         );
@@ -294,10 +313,11 @@ mod tests {
         // Only the constant terms survive at Ω_p
         let sing = Singularity::new(
             0.0,
+            1.0,
             vec![
                 AsymptTerm::power(-0.5, 2.0),
-                AsymptTerm::constant(0.25),
-                AsymptTerm::constant(0.5),
+                AsymptTerm::power(0.0, 0.25),
+                AsymptTerm::power(0.0, 0.5),
                 AsymptTerm::power(1.5, 4.0),
                 AsymptTerm::log(3.0),
             ],
@@ -305,16 +325,62 @@ mod tests {
         assert_relative_eq!(sing.finite_limit(), 0.75, max_relative = 1e-14);
 
         // A square-root band edge leaves nothing behind
-        let edge = Singularity::new(0.0, vec![AsymptTerm::power(0.5, 1.0)]);
+        let edge = Singularity::new(0.0, 1.0, vec![AsymptTerm::power(0.5, 1.0)]);
         assert_eq!(edge.finite_limit(), 0.0);
+    }
+
+    #[test]
+    fn scale() {
+        // S(ω) = 2u^{-1/2} - 3 ln u + 4u^{3/2} for u = |ω-1|/s
+        let s = 8.0f64;
+        let terms = || {
+            vec![
+                AsymptTerm::power(-0.5, 2.0),
+                AsymptTerm::log(3.0),
+                AsymptTerm::power(1.5, 4.0),
+            ]
+        };
+        let sing = Singularity::new(1.0, s, terms());
+        let reference = |omega: f64| {
+            let u = (omega - 1.0f64).abs() / s;
+            2.0 / u.sqrt() - 3.0 * u.ln() + 4.0 * u.powf(1.5)
+        };
+        for omega in [-2.0, 0.5, 1.001, 4.0, 20.0] {
+            assert_relative_eq!(sing.value(omega), reference(omega), max_relative = 1e-14);
+        }
+
+        // The closed-form integral follows the substitution dω = s du
+        let (omega_min, omega_max) = (-3.0, 9.0);
+        let unit = Singularity::new(1.0, 1.0, terms());
+        assert_relative_eq!(
+            sing.integral(omega_min, omega_max),
+            s * unit.integral(1.0 + (omega_min - 1.0) / s, 1.0 + (omega_max - 1.0) / s),
+            max_relative = 1e-14
+        );
+
+        // Rescaling a logarithm leaves c ln(s) behind, which is what survives at Ω_p
+        // once the divergence is cancelled against another singularity
+        assert_relative_eq!(sing.finite_limit(), 3.0 * s.ln(), max_relative = 1e-14);
+        assert_eq!(unit.finite_limit(), 0.0);
+
+        // A power law carries no such remainder whatever the scale
+        let edge = Singularity::new(0.0, 5.0, vec![AsymptTerm::power(0.5, 1.0)]);
+        assert_eq!(edge.finite_limit(), 0.0);
+    }
+
+    #[test]
+    #[should_panic(expected = "singularity scale must be positive and finite")]
+    fn non_positive_scale() {
+        let _ = Singularity::new(0.0, 0.0, vec![AsymptTerm::log(1.0)]);
     }
 
     #[test]
     fn divergences() {
         let sing = Singularity::new(
             0.0,
+            1.0,
             vec![
-                AsymptTerm::constant(0.25),
+                AsymptTerm::power(0.0, 0.25),
                 AsymptTerm::power(0.5, 4.0),
                 AsymptTerm::log(3.0),
                 AsymptTerm::power(-0.5, 2.0),
@@ -337,7 +403,7 @@ mod tests {
     fn strength_order() {
         let strength = |term: AsymptTerm| term.strength();
         let log = strength(AsymptTerm::log(1.0));
-        let constant = strength(AsymptTerm::constant(1.0));
+        let constant = strength(AsymptTerm::power(0.0, 1.0));
         let inv_sqrt = strength(AsymptTerm::power(-0.5, 1.0));
         let inv = strength(AsymptTerm::power(-0.9, 1.0));
 
@@ -361,7 +427,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "must have a bounded support")]
     fn unbounded_support() {
-        let sing = Singularity::new(0.0, vec![AsymptTerm::power(0.5, 1.0)]);
+        let sing = Singularity::new(0.0, 1.0, vec![AsymptTerm::power(0.5, 1.0)]);
         let _ = sing.integral(f64::NEG_INFINITY, 1.0);
     }
 }

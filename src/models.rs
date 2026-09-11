@@ -152,14 +152,14 @@ impl SemicircleDOS {
     fn new(eps: f64, radius: f64) -> SemicircleDOS {
         assert!(radius > 0.0, "radius must be positive");
         let prefactor = 2.0 / (PI * radius);
-        // \sqrt{2(1 \pm x)} = \sqrt{2/r} \sqrt{|ω-Ω_p|} for x = (ω-ε)/r
-        let c = prefactor * (2.0 / radius).sqrt();
+        // \sqrt{2(1 \pm x)} = \sqrt{2} u^{1/2} for x = (ω-ε)/r and u = |ω-Ω_p|/r
+        let c = prefactor * SQRT_2;
         SemicircleDOS {
             eps,
             radius,
             edges: [
-                Singularity::new(eps - radius, vec![AsymptTerm::power(0.5, c)]),
-                Singularity::new(eps + radius, vec![AsymptTerm::power(0.5, c)]),
+                Singularity::new(eps - radius, radius, vec![AsymptTerm::power(0.5, c)]),
+                Singularity::new(eps + radius, radius, vec![AsymptTerm::power(0.5, c)]),
             ],
             prefactor,
         }
@@ -219,7 +219,11 @@ impl PowerLawDOS {
         let prefactor = (r + 1.0) / (w.powf(r + 1.0));
         // For r < 1 the whole of A(ω) is the singular part, R(ω) vanishing
         let singularity = if r < 1.0 {
-            vec![Singularity::new(eps, vec![AsymptTerm::power(r, prefactor)])]
+            vec![Singularity::new(
+                eps,
+                w,
+                vec![AsymptTerm::power(r, (r + 1.0) / w)],
+            )]
         } else {
             vec![]
         };
@@ -281,7 +285,11 @@ impl PseudogapDOS {
         let prefactor = (r + 1.0) / (2.0 * d.powf(r + 1.0));
         // For r < 1 the whole of A(ω) is the singular part, R(ω) vanishing
         let singularity = if r < 1.0 {
-            vec![Singularity::new(eps, vec![AsymptTerm::power(r, prefactor)])]
+            vec![Singularity::new(
+                eps,
+                d,
+                vec![AsymptTerm::power(r, (r + 1.0) / (2.0 * d))],
+            )]
         } else {
             vec![]
         };
@@ -339,20 +347,20 @@ impl ChainDOS {
     fn new(eps: f64, t: f64) -> ChainDOS {
         assert!(t > 0.0, "hopping constant must be positive");
         let prefactor = 1.0 / (2.0 * PI * t);
-        // 1/s + s/8 for s = \sqrt{2(1 \pm x)} = \sqrt{|ω-Ω_p|/t} and x = (ω-ε)/(2t).
+        // 1/s + s/8 for s = \sqrt{2(1 \pm x)} = \sqrt{u}, x = (ω-ε)/(2t) and u = |ω-Ω_p|/t.
         // The second term leaves R(ω) with a bounded derivative at the edge.
         let terms = || {
             vec![
-                AsymptTerm::power(-0.5, prefactor * t.sqrt()),
-                AsymptTerm::power(0.5, prefactor / (8.0 * t.sqrt())),
+                AsymptTerm::power(-0.5, prefactor),
+                AsymptTerm::power(0.5, prefactor / 8.0),
             ]
         };
         ChainDOS {
             eps,
             t,
             edges: [
-                Singularity::new(eps - 2.0 * t, terms()),
-                Singularity::new(eps + 2.0 * t, terms()),
+                Singularity::new(eps - 2.0 * t, t, terms()),
+                Singularity::new(eps + 2.0 * t, t, terms()),
             ],
             prefactor,
         }
@@ -417,13 +425,13 @@ impl BetheDOS {
         let prefactor = sz1 / (PI * denom_scale);
         // Value of the denominator 1 - ((ω-ε)/(zt))^2 at the band edges
         let edge_denom = (1.0 - 2.0 / z).powi(2);
-        // \sqrt{2(1 \pm x)} = \sqrt{2/num_scale} \sqrt{|ω-Ω_p|} for x = (ω-ε)/num_scale
-        let c = prefactor / edge_denom * (2.0 / num_scale).sqrt();
+        // \sqrt{2(1 \pm x)} = \sqrt{2} u^{1/2} for x = (ω-ε)/num_scale and u = |ω-Ω_p|/num_scale
+        let c = prefactor / edge_denom * SQRT_2;
         BetheDOS {
             eps,
             edges: [
-                Singularity::new(eps - num_scale, vec![AsymptTerm::power(0.5, c)]),
-                Singularity::new(eps + num_scale, vec![AsymptTerm::power(0.5, c)]),
+                Singularity::new(eps - num_scale, num_scale, vec![AsymptTerm::power(0.5, c)]),
+                Singularity::new(eps + num_scale, num_scale, vec![AsymptTerm::power(0.5, c)]),
             ],
             num_scale,
             denom_scale,
@@ -502,13 +510,10 @@ impl SquareDOS {
             eps,
             t,
             edges: [eps - 4.0 * t, eps + 4.0 * t],
-            // -c ln|ω-ε| + c ln(16t) = -c ln|(ω-ε)/(16t)|
             singularity: [Singularity::new(
                 eps,
-                vec![
-                    AsymptTerm::log(prefactor),
-                    AsymptTerm::constant(prefactor * (16.0 * t).ln()),
-                ],
+                16.0 * t,
+                vec![AsymptTerm::log(prefactor)],
             )],
             prefactor,
         }
@@ -530,9 +535,7 @@ impl ContinuousSF for SquareDOS {
             // K(1 - a^2) = ln(4/a) + (a^2/4)[ln(4/a) - 1] + O(a^4 ln a) instead.
             self.prefactor * 0.25 * ax.powi(2) * ((4.0 / ax).ln() - 1.0)
         } else {
-            // -S(ω) written out: taking it from the singularity terms would split the
-            // logarithm into ln|ω-ε| - ln(16t), losing digits to the K + ln cancellation
-            self.prefactor * ((1.0 - ax * ax).elliptic_k() + (0.25 * ax).ln())
+            self.prefactor * (1.0 - ax * ax).elliptic_k() - self.singularity[0].value(omega)
         }
     }
     fn singularities(&self) -> &[Singularity] {
@@ -583,13 +586,10 @@ impl TriangularDOS {
             eps,
             t,
             edges: [omega_min, omega_max],
-            // -c ln|ω-Ω| + c ln(8|t|) = -c ln|(ω-Ω)/(8t)|
             singularity: [Singularity::new(
                 eps + 2.0 * t,
-                vec![
-                    AsymptTerm::log(prefactor * 0.75),
-                    AsymptTerm::constant(prefactor * 0.75 * (8.0 * t.abs()).ln()),
-                ],
+                8.0 * t.abs(),
+                vec![AsymptTerm::log(prefactor * 0.75)],
             )],
             prefactor,
         }
@@ -687,20 +687,14 @@ impl HoneycombDOS {
     fn new(eps: f64, t: f64) -> HoneycombDOS {
         assert!(t > 0.0, "hopping constant must be positive");
         let prefactor = 1.0 / (PI.powi(2) * t);
-        let log_terms = || {
-            vec![
-                AsymptTerm::log(prefactor * 0.75),
-                AsymptTerm::constant(prefactor * 0.75 * (4.0 * t).ln()),
-            ]
-        };
+        let log_terms = || vec![AsymptTerm::log(prefactor * 0.75)];
         HoneycombDOS {
             eps,
             t,
             edges: [eps - 3.0 * t, eps + 3.0 * t],
-            // -c ln|ω-Ω_p| + c ln(4t) = -c ln|(ω-Ω_p)/(4t)|
             singularities: [
-                Singularity::new(eps - t, log_terms()),
-                Singularity::new(eps + t, log_terms()),
+                Singularity::new(eps - t, 4.0 * t, log_terms()),
+                Singularity::new(eps + t, 4.0 * t, log_terms()),
             ],
             prefactor,
         }
@@ -838,20 +832,14 @@ impl LiebDOS {
         assert!(t > 0.0, "hopping constant must be positive");
         let prefactor = 1.0 / (PI.powi(2) * t);
         let half_width = 2.0 * SQRT_2 * t;
-        let log_terms = || {
-            vec![
-                AsymptTerm::log(prefactor),
-                AsymptTerm::constant(prefactor * (2.0 * t).ln()),
-            ]
-        };
+        let log_terms = || vec![AsymptTerm::log(prefactor)];
         LiebDOS {
             eps,
             t,
             edges: [eps - half_width, eps + half_width],
-            // -c ln|ω-Ω_p| + c ln(2t) = -c ln|(ω-Ω_p)/(2t)|
             singularities: [
-                Singularity::new(eps - 2.0 * t, log_terms()),
-                Singularity::new(eps + 2.0 * t, log_terms()),
+                Singularity::new(eps - 2.0 * t, 2.0 * t, log_terms()),
+                Singularity::new(eps + 2.0 * t, 2.0 * t, log_terms()),
             ],
             prefactor,
         }
