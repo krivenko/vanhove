@@ -177,8 +177,9 @@ impl ContinuousSF for SemicircleDOS {
             -self.edges[0].value(omega)
         } else {
             let x = (omega - self.eps) / self.radius;
-            self.prefactor
-                * ((1.0 - x * x).sqrt() - (2.0 * (1.0 - x)).sqrt() - (2.0 * (1.0 + x)).sqrt())
+            self.prefactor * (1.0 - x * x).sqrt()
+                - self.edges[0].value(omega)
+                - self.edges[1].value(omega)
         }
     }
     fn singularities(&self) -> &[Singularity] {
@@ -416,9 +417,8 @@ impl BetheDOS {
         let prefactor = sz1 / (PI * denom_scale);
         // Value of the denominator 1 - ((ω-ε)/(zt))^2 at the band edges
         let edge_denom = (1.0 - 2.0 / z).powi(2);
-        let s_prefactor = prefactor / edge_denom;
         // \sqrt{2(1 \pm x)} = \sqrt{2/num_scale} \sqrt{|ω-Ω_p|} for x = (ω-ε)/num_scale
-        let c = s_prefactor * (2.0 / num_scale).sqrt();
+        let c = prefactor / edge_denom * (2.0 / num_scale).sqrt();
         BetheDOS {
             eps,
             edges: [
@@ -530,6 +530,8 @@ impl ContinuousSF for SquareDOS {
             // K(1 - a^2) = ln(4/a) + (a^2/4)[ln(4/a) - 1] + O(a^4 ln a) instead.
             self.prefactor * 0.25 * ax.powi(2) * ((4.0 / ax).ln() - 1.0)
         } else {
+            // -S(ω) written out: taking it from the singularity terms would split the
+            // logarithm into ln|ω-ε| - ln(16t), losing digits to the K + ln cancellation
             self.prefactor * ((1.0 - ax * ax).elliptic_k() + (0.25 * ax).ln())
         }
     }
