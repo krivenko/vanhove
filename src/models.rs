@@ -39,20 +39,25 @@ struct FlatDOS {
     eps: f64,
     d: f64,
     delta: f64,
+    /// Half-bandwidth measured in edge widths, $d/\delta$.
+    inv_edge_width: f64,
     prefactor: f64,
 }
 impl FlatDOS {
     fn new(eps: f64, d: f64, delta: f64) -> FlatDOS {
         assert!(d > 0.0, "bandwidth must be positive");
         assert!(delta >= 0.0, "edge width must be non-negative");
+        // Infinite for sharp edges, which never reach for it
+        let inv_edge_width = d / delta;
         FlatDOS {
             eps,
             d,
             delta,
+            inv_edge_width,
             prefactor: if delta == 0.0 {
                 1.0 / (2.0 * d)
             } else {
-                let x = (d / delta).tanh();
+                let x = inv_edge_width.tanh();
                 x / (d * (1.0 + x))
             },
         }
@@ -70,9 +75,10 @@ impl ContinuousSF for FlatDOS {
         if self.delta == 0.0 {
             self.prefactor
         } else {
+            let x = (omega - self.eps) / self.d;
             self.prefactor
-                * fermi((omega - self.eps - self.d) / self.delta)
-                * fermi(-(omega - self.eps + self.d) / self.delta)
+                * fermi(self.inv_edge_width * (x - 1.0))
+                * fermi(-self.inv_edge_width * (x + 1.0))
         }
     }
 }
@@ -101,7 +107,7 @@ pub fn flat(eps: f64, d: f64, delta: f64) -> SpectralFunction {
 /// Gaussian density of states.
 struct GaussianDOS {
     eps: f64,
-    denom: f64,
+    sigma: f64,
     prefactor: f64,
 }
 impl GaussianDOS {
@@ -109,7 +115,7 @@ impl GaussianDOS {
         assert!(sigma > 0.0, "width must be positive");
         GaussianDOS {
             eps,
-            denom: 2.0 * sigma.powi(2),
+            sigma,
             prefactor: 1.0 / (sigma * (2.0 * PI).sqrt()),
         }
     }
@@ -119,7 +125,8 @@ impl ContinuousSF for GaussianDOS {
         (f64::NEG_INFINITY, f64::INFINITY)
     }
     fn regular(&self, omega: f64) -> f64 {
-        self.prefactor * (-(omega - self.eps).powi(2) / self.denom).exp()
+        let x = (omega - self.eps) / self.sigma;
+        self.prefactor * (-0.5 * x.powi(2)).exp()
     }
 }
 
