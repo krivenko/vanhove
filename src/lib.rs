@@ -56,9 +56,7 @@ pub struct SpectralFunction {
     // Contributions of discrete resonances.
     discrete: DiscreteSF,
     // Continuous contributions with their weights.
-    // Invariant: all weights are non-zero. A vanishing weight adds nothing to the
-    // spectral function, while still consuming memory and complicating the algorithms
-    // that traverse this list.
+    // Invariant: all weights are non-zero and no two entries share a contribution.
     continuous: Vec<(Arc<dyn ContinuousSF>, f64)>,
 }
 
@@ -96,13 +94,11 @@ impl Neg for SpectralFunction {
 impl Add for SpectralFunction {
     type Output = Self;
     fn add(self, rhs: SpectralFunction) -> SpectralFunction {
+        // Concatenation can repeat a contribution the operands have in common, which
+        // `from_discrete_continuous()` merges back into a single weight.
         let mut continuous = self.continuous;
         continuous.extend(rhs.continuous);
-        // Concatenation of two invariant-abiding lists needs no further filtering
-        SpectralFunction {
-            discrete: self.discrete + rhs.discrete,
-            continuous,
-        }
+        SpectralFunction::from_discrete_continuous(self.discrete + rhs.discrete, continuous)
     }
 }
 /// Subtraction of two spectral functions.
@@ -116,15 +112,38 @@ impl SpectralFunction {
     /// Build a `SpectralFunction` from a discrete spectral function and a list of
     /// continuous contributions with their weights.
     ///
-    /// Contributions of zero weight are dropped.
+    /// Repeated contributions are merged by summing their weights, keeping the order
+    /// of first appearance. A contribution is dropped once its total weight is small
+    /// enough against the total magnitude of the weights to be a cancellation
+    /// artefact, by the same relative tolerance that governs the discrete weights.
+    ///
+    /// Two contributions count as one only when they share an allocation, so that
+    /// separately built models of identical parameters stay apart.
     fn from_discrete_continuous(
         dsf: DiscreteSF,
-        mut csf: Vec<(Arc<dyn ContinuousSF>, f64)>,
+        csf: Vec<(Arc<dyn ContinuousSF>, f64)>,
     ) -> SpectralFunction {
-        csf.retain(|(_, w)| *w != 0.0);
+        // Contributions grouped by identity: (contribution, ∑ w, ∑ |w|)
+        let mut merged: Vec<(Arc<dyn ContinuousSF>, f64, f64)> = Vec::with_capacity(csf.len());
+        for (cd, w) in csf {
+            match merged
+                .iter_mut()
+                .find(|(other, _, _)| Arc::ptr_eq(other, &cd))
+            {
+                Some((_, sum, magnitude)) => {
+                    *sum += w;
+                    *magnitude += w.abs();
+                }
+                None => merged.push((cd, w, w.abs())),
+            }
+        }
         SpectralFunction {
             discrete: dsf,
-            continuous: csf,
+            continuous: merged
+                .into_iter()
+                .filter(|(_, sum, magnitude)| sum.abs() > DiscreteSF::WEIGHT_TOL * magnitude)
+                .map(|(cd, sum, _)| (cd, sum))
+                .collect(),
         }
     }
 
@@ -449,6 +468,43 @@ mod tests {
     }
 
     #[test]
+    fn add_merges_repeated_contributions() {
+        let dos = chain(0.5, 1.0);
+        let omega = 0.8;
+
+        // A contribution repeated by addition is listed once, with the weights summed
+        let tripled = dos.clone() + dos.clone() + dos.clone();
+        assert_eq!(tripled.continuous.len(), 1);
+        assert_relative_eq!(tripled.total_weight(), 3.0, epsilon = 1e-12);
+        assert_relative_eq!(
+            tripled.continuous_at(omega),
+            3.0 * dos.continuous_at(omega),
+            max_relative = 1e-12
+        );
+
+        // Weights cancelling each other out drop the contribution altogether
+        let zero = 2.0 * dos.clone() - 2.0 * dos.clone();
+        assert!(zero.continuous.is_empty());
+        assert_eq!(zero.continuous_at(omega), 0.0);
+
+        // Contributions are told apart by their allocation rather than by their
+        // parameters, so separately built models of the same band stay apart
+        let pair = chain(0.5, 1.0) + chain(0.5, 1.0);
+        assert_eq!(pair.continuous.len(), 2);
+        assert_relative_eq!(
+            pair.continuous_at(omega),
+            2.0 * dos.continuous_at(omega),
+            max_relative = 1e-12
+        );
+
+        // Merging keeps the order of first appearance
+        let mixed = dos.clone() + square(0.0, 1.0) + dos.clone();
+        assert_eq!(mixed.continuous.len(), 2);
+        assert_eq!(mixed.continuous[0].1, 2.0);
+        assert_eq!(mixed.continuous[1].1, 1.0);
+    }
+
+    #[test]
     fn neg() {
         let dos = 2.0 * discrete(&[-0.7, 1.2], &[0.25, 0.6]) + 5.0 * gaussian(1.4, 0.5);
         let neg_dos = -dos.clone();
@@ -487,6 +543,7 @@ mod tests {
         // A spectral function and its negation cancel each other out
         let zero = dos.clone() + (-dos);
         assert!(zero.discrete.is_empty());
+        assert!(zero.continuous.is_empty());
         assert_relative_eq!(zero.total_weight(), 0.0, epsilon = 1e-12);
         assert_eq!(zero.continuous_at(1.4), 0.0);
     }
