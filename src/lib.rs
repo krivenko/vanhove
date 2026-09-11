@@ -8,7 +8,7 @@ mod util;
 
 use std::f64::consts::PI;
 use std::ops::{Add, Mul, Neg, Sub};
-use std::rc::Rc;
+use std::sync::Arc;
 
 use bilby::QuadratureError;
 use num_complex::Complex64;
@@ -50,7 +50,7 @@ struct Singularity {
 ///
 /// The singular terms are keyed by their index p, which runs over the valid
 /// indices of the slice returned by `singularities()`.
-trait ContinuousSF {
+trait ContinuousSF: Send + Sync {
     /// Support of the spectral function specified as a segment
     /// $[\omega_{min}, \omega_{max}]$.
     fn support(&self) -> (f64, f64);
@@ -83,7 +83,7 @@ pub struct SpectralFunction {
     // Invariant: all weights are non-zero. A vanishing weight adds nothing to the
     // spectral function, while still consuming memory and complicating the algorithms
     // that traverse this list.
-    continuous: Vec<(Rc<dyn ContinuousSF>, f64)>,
+    continuous: Vec<(Arc<dyn ContinuousSF>, f64)>,
 }
 
 /// Multiply spectral function by a real number from the right.
@@ -143,7 +143,7 @@ impl SpectralFunction {
     /// Contributions of zero weight are dropped.
     fn from_discrete_continuous(
         dsf: DiscreteSF,
-        mut csf: Vec<(Rc<dyn ContinuousSF>, f64)>,
+        mut csf: Vec<(Arc<dyn ContinuousSF>, f64)>,
     ) -> SpectralFunction {
         csf.retain(|(_, w)| *w != 0.0);
         SpectralFunction {
@@ -154,7 +154,7 @@ impl SpectralFunction {
 
     /// Build a `SpectralFunction` out of a single continuous contribution of unit weight.
     fn from_continuous<C: ContinuousSF + 'static>(csf: C) -> SpectralFunction {
-        SpectralFunction::from_discrete_continuous(DiscreteSF::new(), vec![(Rc::new(csf), 1.0)])
+        SpectralFunction::from_discrete_continuous(DiscreteSF::new(), vec![(Arc::new(csf), 1.0)])
     }
 
     /// Discrete part of the spectral function.
@@ -352,9 +352,18 @@ impl SpectralFunction {
 
 #[cfg(test)]
 mod tests {
+    use crate::SpectralFunction;
     use crate::models::{chain, discrete, gaussian, semicircle, square};
     use approx::assert_relative_eq;
     use std::f64::consts::PI;
+
+    #[test]
+    fn send_sync() {
+        // Spectral functions cross thread boundaries, so that frequency scans can be
+        // run in parallel. `ContinuousSF` requires as much of every model.
+        fn assert_send_sync<T: Send + Sync>() {}
+        assert_send_sync::<SpectralFunction>();
+    }
 
     #[test]
     fn total_weight() {
