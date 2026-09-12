@@ -235,12 +235,13 @@ impl SpectralFunction {
 
     /// Convolution with another spectral function,
     /// $\int A(\nu) B(\omega - \nu) d\nu$.
+    ///
+    /// Two continuous parts meet to within some $10^{-9}$ of the peak of $A(\omega)$:
+    /// the frequencies where the result stops being smooth are derived, the asymptotics
+    /// there are not, and the regular part is interpolated across them.
     pub fn conv(&self, other: &SpectralFunction) -> SpectralFunction {
-        assert!(
-            self.continuous.is_empty() || other.continuous.is_empty(),
-            "the singular structure of a continuous convolution must be supplied"
-        );
-        self.conv_with(other, vec![], vec![], None)
+        let breakpoints = crate::conv::breakpoints(self, other);
+        self.conv_with(other, vec![], breakpoints, None)
     }
 
     /// Convolution with another spectral function, given the singular structure
@@ -847,12 +848,6 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "singular structure of a continuous convolution")]
-    fn conv_two_continuous() {
-        let _ = chain(0.0, 1.0).conv(&square(0.0, 1.0));
-    }
-
-    #[test]
     fn conv_continuous_continuous() {
         // Two sharp-edged boxes of half-width d convolve into a triangle,
         // (2d - |ω|)/(4d^2), with a kink at the centre and none elsewhere
@@ -883,6 +878,51 @@ mod tests {
             })
             .fold(0.0f64, f64::max);
         assert!(worst > 1e-6, "the kink cost nothing: {worst:.2e}");
+    }
+
+    #[test]
+    fn conv_derives_its_breakpoints() {
+        // A convolution stops being smooth where the frequencies at which either factor
+        // does meet. For a semicircle on [-1.5, 2.5] against a box on [-2, 0] that is
+        // the four sums of their edges.
+        let (a, b) = (semicircle(0.5, 2.0), flat(-1.0, 1.0, 0.0));
+        assert_eq!(crate::conv::breakpoints(&a, &b), vec![-3.5, -1.5, 0.5, 2.5]);
+
+        // The chain edges against the square lattice edges and its logarithmic peak
+        // give the four van Hove points of the simple cubic band
+        let (ch, sq) = (chain(0.0, 1.0), square(0.0, 1.0));
+        assert_eq!(
+            crate::conv::breakpoints(&ch, &sq),
+            vec![-6.0, -2.0, 2.0, 6.0]
+        );
+    }
+
+    #[test]
+    fn conv_two_continuous() {
+        // `conv()` derives the structure that `simple_cubic()` is handed
+        let t = 1.0f64;
+        let derived = chain(0.0, t).conv(&square(0.0, t));
+        let known = simple_cubic(0.0, t);
+        assert_eq!(derived.support(), known.support());
+        assert_relative_eq!(derived.total_weight(), 1.0, max_relative = 1e-14);
+
+        // Deriving the frequencies without the asymptotics that go with them costs
+        // about two orders of magnitude against the closed-form cusps
+        for (order, reference) in [(0i32, 1.0f64), (2, 6.0 * t * t), (4, 90.0 * t.powi(4))] {
+            let moment = derived.integrate(|omega| omega.powi(order), None).unwrap();
+            assert_relative_eq!(moment, reference, max_relative = 1e-8);
+        }
+
+        // The two agree pointwise to the accuracy the interpolation affords
+        let peak = known.continuous_at(0.0);
+        for i in 1..200 {
+            let omega = -6.0 * t + 12.0 * t * (i as f64) / 200.0;
+            assert_abs_diff_eq!(
+                derived.continuous_at(omega),
+                known.continuous_at(omega),
+                epsilon = 1e-6 * peak
+            );
+        }
     }
 
     #[test]

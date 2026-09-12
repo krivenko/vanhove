@@ -72,6 +72,36 @@ fn pair(c1: &dyn ContinuousSF, c2: &dyn ContinuousSF, omega: f64, tol: f64) -> f
     total
 }
 
+/// Frequencies where the continuous parts of `a` and `b` convolve into something that
+/// is not smooth.
+///
+/// A convolution departs from smoothness where the frequencies at which either factor
+/// does meet, so the set is the pairwise sums of those of the two. The ends of a
+/// support count among them: that is where a factor stops contributing at all.
+pub fn breakpoints(a: &SpectralFunction, b: &SpectralFunction) -> Vec<f64> {
+    let points = |sf: &SpectralFunction| {
+        let mut out = Vec::new();
+        for (csf, _) in &sf.continuous {
+            let (omega_min, omega_max) = csf.support();
+            out.push(omega_min);
+            out.push(omega_max);
+            out.extend(non_smooth(csf.as_ref()));
+        }
+        out
+    };
+    let (points_a, points_b) = (points(a), points(b));
+
+    let mut sums = Vec::with_capacity(points_a.len() * points_b.len());
+    for x in &points_a {
+        for y in &points_b {
+            sums.push(x + y);
+        }
+    }
+    sums.sort_unstable_by(f64::total_cmp);
+    sums.dedup();
+    sums
+}
+
 /// Convolution of the continuous parts of two spectral functions, evaluated by
 /// quadrature and carrying a singular structure settled from outside.
 pub struct Convolution<'a> {
