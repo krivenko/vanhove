@@ -53,7 +53,7 @@ fn pair(c1: &dyn ContinuousSF, c2: &dyn ContinuousSF, omega: f64, tol: f64) -> f
         if sing.is_trivial() {
             continue;
         }
-        let position = sing.position;
+        let position = sing.position();
         if position < lo || position > hi {
             // S_p stays bounded over an overlap it does not reach into
             total += quad(&|nu| sing.value(nu) * other(nu));

@@ -4,9 +4,9 @@
 
 mod conv;
 pub mod discrete;
-mod interp;
+pub mod interp;
 pub mod models;
-mod singularity;
+pub mod singularity;
 mod util;
 
 use std::f64::consts::PI;
@@ -32,14 +32,57 @@ use crate::singularity::{Singularity, Strength};
 /// $R(\omega)$ is a smooth function and each $S_p(\omega)$ has one isolated
 /// integrable singularity at $\Omega_p$.
 ///
-/// $S_p(\omega)$ is described in closed form by the corresponding [`Singularity`],
+/// $S_p(\omega)$ is described in closed form by the corresponding [`singularity::Singularity`],
 /// which fixes it over the whole support and not merely near $\Omega_p$. A support
 /// carrying singularities must be bounded.
 ///
 /// Implementations are shared behind an [`Arc`], so they must be [`Send`] and
 /// [`Sync`]. A spectral function is read-only once built, which every model
 /// satisfies by holding nothing but plain data.
-trait ContinuousSF: Send + Sync {
+/// # Example
+///
+/// A band rising as $\frac{3}{2}\sqrt{\omega-\epsilon}$ out of its lower edge and
+/// cut off a unit of frequency above it.
+///
+/// ```
+/// use vanhove::singularity::{AsymptTerm, Singularity};
+/// use vanhove::{ContinuousSF, SpectralFunction};
+///
+/// struct SqrtBand {
+///     eps: f64,
+///     edge: [Singularity; 1],
+/// }
+///
+/// impl SqrtBand {
+///     fn new(eps: f64) -> SqrtBand {
+///         let terms = vec![AsymptTerm::power(0.5, 1.5)];
+///         SqrtBand { eps, edge: [Singularity::new(eps, 1.0, terms)] }
+///     }
+/// }
+///
+/// impl ContinuousSF for SqrtBand {
+///     fn support(&self) -> (f64, f64) {
+///         (self.eps, self.eps + 1.0)
+///     }
+///     // The whole of A(ω) is the singular part, so nothing is left over
+///     fn regular(&self, _omega: f64) -> f64 {
+///         0.0
+///     }
+///     fn singularities(&self) -> &[Singularity] {
+///         &self.edge
+///     }
+///     fn shifted(&self, by: f64) -> Box<dyn ContinuousSF> {
+///         Box::new(SqrtBand::new(self.eps + by))
+///     }
+/// }
+///
+/// let dos = SpectralFunction::from_continuous(SqrtBand::new(0.0));
+///
+/// // The band is normalized, and its first moment is 3/5
+/// assert!((dos.integrate(|_| 1.0, None).unwrap() - 1.0).abs() < 1e-12);
+/// assert!((dos.integrate(|omega| omega, None).unwrap() - 0.6).abs() < 1e-12);
+/// ```
+pub trait ContinuousSF: Send + Sync {
     /// Support of the spectral function specified as a segment
     /// $[\omega_{min}, \omega_{max}]$.
     fn support(&self) -> (f64, f64);
@@ -122,7 +165,7 @@ impl Sub for SpectralFunction {
 fn non_smooth(csf: &dyn ContinuousSF) -> impl Iterator<Item = f64> + '_ {
     csf.singularities()
         .iter()
-        .map(|s| s.position)
+        .map(|s| s.position())
         .chain(csf.breakpoints().iter().copied())
 }
 
@@ -182,7 +225,7 @@ impl SpectralFunction {
     }
 
     /// Build a `SpectralFunction` out of a single continuous contribution of unit weight.
-    fn from_continuous<C: ContinuousSF + 'static>(csf: C) -> SpectralFunction {
+    pub fn from_continuous<C: ContinuousSF + 'static>(csf: C) -> SpectralFunction {
         SpectralFunction::from_discrete_continuous(DiscreteSF::new(), vec![(Arc::new(csf), 1.0)])
     }
 
@@ -240,20 +283,19 @@ impl SpectralFunction {
     /// the frequencies where the result stops being smooth are derived, the asymptotics
     /// there are not, and the regular part is interpolated across them.
     pub fn conv(&self, other: &SpectralFunction) -> SpectralFunction {
-        let breakpoints = crate::conv::breakpoints(self, other);
-        self.conv_with(other, vec![], breakpoints, None)
+        self.conv_with(other, vec![], None)
     }
 
     /// Convolution with another spectral function, given the singular structure
     /// $C_A \ast C_B$ is known to have.
     ///
-    /// `singularities` and `breakpoints` describe the convolution of the two
-    /// continuous parts alone, the other three terms carrying their own.
-    pub(crate) fn conv_with(
+    /// `singularities` describes the convolution of the two continuous parts alone,
+    /// the other three terms carrying their own. The frequencies where the result
+    /// stops being smooth are derived either way.
+    pub fn conv_with(
         &self,
         other: &SpectralFunction,
         singularities: Vec<Singularity>,
-        breakpoints: Vec<f64>,
         tol: Option<f64>,
     ) -> SpectralFunction {
         // Every resonance of one operand against the continuous part of the other
@@ -264,6 +306,7 @@ impl SpectralFunction {
         // interpolated over the singular structure given
         if !self.continuous.is_empty() && !other.continuous.is_empty() {
             let tol = tol.unwrap_or(Interpolated::DEFAULT_TOL);
+            let breakpoints = crate::conv::breakpoints(self, other);
             let convolution = Convolution::new(self, other, singularities, breakpoints, tol);
             let interpolated = Interpolated::new(&convolution, Some(tol));
             continuous.push((Arc::new(interpolated) as Arc<dyn ContinuousSF>, 1.0));
@@ -301,7 +344,7 @@ impl SpectralFunction {
             let mut value = csf.regular(omega);
             for sing in csf.singularities() {
                 // Away from Ω_p the asymptotics is finite and needs no analysis
-                if sing.position != omega {
+                if sing.position() != omega {
                     value += sing.value(omega);
                     continue;
                 }
@@ -376,7 +419,7 @@ impl SpectralFunction {
                     continue;
                 }
                 // ∫S_p(ω)[f(ω) - f(Ω_p)]dω
-                let omega_p = sing.position;
+                let omega_p = sing.position();
                 let f_p = f(omega_p);
                 res_contrib += util::bilby_integrate(
                     |omega| {
@@ -853,7 +896,7 @@ mod tests {
         // (2d - |ω|)/(4d^2), with a kink at the centre and none elsewhere
         let d = 1.5f64;
         let box_dos = flat(0.0, d, 0.0);
-        let triangle = box_dos.conv_with(&box_dos, vec![], vec![0.0], None);
+        let triangle = box_dos.conv_with(&box_dos, vec![], None);
         assert_eq!(triangle.support(), Some((-2.0 * d, 2.0 * d)));
 
         let reference = |omega: f64| (2.0 * d - omega.abs()) / (4.0 * d * d);
@@ -869,15 +912,11 @@ mod tests {
         // Weight is multiplicative here as everywhere
         assert_relative_eq!(triangle.total_weight(), 1.0, max_relative = 1e-12);
 
-        // Without the kink reported, the fit has to resolve it inside a panel
-        let unsplit = box_dos.conv_with(&box_dos, vec![], vec![], None);
-        let worst = (0..=40)
-            .map(|i| {
-                let omega = -2.0 * d + 4.0 * d * (i as f64) / 40.0;
-                (unsplit.continuous_at(omega) - reference(omega)).abs()
-            })
-            .fold(0.0f64, f64::max);
-        assert!(worst > 1e-6, "the kink cost nothing: {worst:.2e}");
+        // The kink is derived, not supplied: it is the sum of the two boxes' edges
+        assert_eq!(
+            crate::conv::breakpoints(&box_dos, &box_dos),
+            vec![-2.0 * d, 0.0, 2.0 * d]
+        );
     }
 
     #[test]
@@ -931,7 +970,7 @@ mod tests {
         // edge of the other, at -1.5 and 0.5 inside the support [-3.5, 2.5].
         let a = semicircle(0.5, 2.0);
         let b = flat(-1.0, 1.0, 0.0);
-        let c = a.conv_with(&b, vec![], vec![-1.5, 0.5], None);
+        let c = a.conv_with(&b, vec![], None);
         assert_eq!(c.support(), Some((-3.5, 2.5)));
 
         assert_relative_eq!(
