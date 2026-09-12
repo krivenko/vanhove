@@ -1042,6 +1042,9 @@ pub fn lieb(eps: f64, t: f64) -> SpectralFunction {
 /// the upper half following by the symmetry of the band about $\epsilon$.
 pub fn simple_cubic(eps: f64, t: f64) -> SpectralFunction {
     assert!(t > 0.0, "hopping constant must be positive");
+    // Once the cusps are subtracted the regular part still decays algebraically, so a
+    // tighter tolerance runs the expansion into its ceiling for no accuracy gained
+    const TOL: f64 = 1e-10;
     // Coefficients of the band edge and saddle point cusps, the latter counting the
     // three equivalent critical points of its star. Both are written for u = |ω-Ω_p|/t.
     let edge = 1.0 / (4.0 * PI.powi(2) * t);
@@ -1058,7 +1061,7 @@ pub fn simple_cubic(eps: f64, t: f64) -> SpectralFunction {
             cusp(eps + 6.0 * t, edge, 0.0),
         ],
         vec![],
-        None,
+        Some(TOL),
     )
 }
 
