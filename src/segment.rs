@@ -53,6 +53,14 @@ impl Segment {
         0.5 * self.min + 0.5 * self.max
     }
 
+    /// The same segment displaced in frequency by `by`.
+    pub fn shifted(&self, by: f64) -> Segment {
+        Segment {
+            min: self.min + by,
+            max: self.max + by,
+        }
+    }
+
     /// The parts of the segment below and above `omega`, which must lie within it.
     ///
     /// The two share the frequency they are split at, so a split at an end of the

@@ -36,6 +36,7 @@ pub fn discrete(levels: &[f64], weights: &[f64]) -> SpectralFunction {
 // (Soft-edged) flat DOS
 //
 
+#[derive(Clone)]
 struct FlatDOS {
     eps: f64,
     d: f64,
@@ -82,6 +83,12 @@ impl ContinuousSF for FlatDOS {
                 * fermi(-self.inv_edge_width * (x + 1.0))
         }
     }
+    fn shifted(&self, by: f64) -> Box<dyn ContinuousSF> {
+        Box::new(FlatDOS {
+            eps: self.eps + by,
+            ..self.clone()
+        })
+    }
 }
 
 /// Returns normalized flat density of states, optionally with smooth, Fermi-like band edges.
@@ -106,6 +113,7 @@ pub fn flat(eps: f64, d: f64, delta: f64) -> SpectralFunction {
 //
 
 /// Gaussian density of states.
+#[derive(Clone)]
 struct GaussianDOS {
     eps: f64,
     sigma: f64,
@@ -129,6 +137,12 @@ impl ContinuousSF for GaussianDOS {
         let x = (omega - self.eps) / self.sigma;
         self.prefactor * (-0.5 * x.powi(2)).exp()
     }
+    fn shifted(&self, by: f64) -> Box<dyn ContinuousSF> {
+        Box::new(GaussianDOS {
+            eps: self.eps + by,
+            ..self.clone()
+        })
+    }
 }
 
 /// Returns normalized Gaussian density of states.
@@ -147,6 +161,7 @@ pub fn gaussian(eps: f64, sigma: f64) -> SpectralFunction {
 //
 
 /// Semicircle (Wigner) density of states.
+#[derive(Clone)]
 struct SemicircleDOS {
     eps: f64,
     radius: f64,
@@ -192,6 +207,13 @@ impl ContinuousSF for SemicircleDOS {
     }
     fn singularities(&self) -> &[Singularity] {
         &self.edges
+    }
+    fn shifted(&self, by: f64) -> Box<dyn ContinuousSF> {
+        Box::new(SemicircleDOS {
+            eps: self.eps + by,
+            edges: self.edges.each_ref().map(|s| s.shifted(by)),
+            ..self.clone()
+        })
     }
 }
 
@@ -240,6 +262,12 @@ impl ContinuousSF for PowerLawDOS {
     }
     fn singularities(&self) -> &[Singularity] {
         &self.singularity
+    }
+    fn shifted(&self, by: f64) -> Box<dyn ContinuousSF> {
+        Box::new(PowerLawDOS {
+            edges: self.edges.shifted(by),
+            singularity: self.singularity.each_ref().map(|s| s.shifted(by)),
+        })
     }
 }
 
@@ -291,6 +319,12 @@ impl ContinuousSF for PseudogapDOS {
     fn singularities(&self) -> &[Singularity] {
         &self.singularity
     }
+    fn shifted(&self, by: f64) -> Box<dyn ContinuousSF> {
+        Box::new(PseudogapDOS {
+            edges: self.edges.shifted(by),
+            singularity: self.singularity.each_ref().map(|s| s.shifted(by)),
+        })
+    }
 }
 
 /// Returns normalized density of states with a pseudogap.
@@ -311,6 +345,7 @@ pub fn pseudogap(eps: f64, r: f64, d: f64) -> SpectralFunction {
 //
 
 /// Density of states of a linear chain.
+#[derive(Clone)]
 struct ChainDOS {
     eps: f64,
     t: f64,
@@ -362,6 +397,13 @@ impl ContinuousSF for ChainDOS {
     fn singularities(&self) -> &[Singularity] {
         &self.edges
     }
+    fn shifted(&self, by: f64) -> Box<dyn ContinuousSF> {
+        Box::new(ChainDOS {
+            eps: self.eps + by,
+            edges: self.edges.each_ref().map(|s| s.shifted(by)),
+            ..self.clone()
+        })
+    }
 }
 
 /// Returns normalized density of states of a linear chain.
@@ -382,6 +424,7 @@ pub fn chain(eps: f64, t: f64) -> SpectralFunction {
 //
 
 /// Density of states of a Bethe lattice.
+#[derive(Clone)]
 struct BetheDOS {
     eps: f64,
     /// Band edges.
@@ -437,6 +480,13 @@ impl ContinuousSF for BetheDOS {
     fn singularities(&self) -> &[Singularity] {
         &self.edges
     }
+    fn shifted(&self, by: f64) -> Box<dyn ContinuousSF> {
+        Box::new(BetheDOS {
+            eps: self.eps + by,
+            edges: self.edges.each_ref().map(|s| s.shifted(by)),
+            ..self.clone()
+        })
+    }
 }
 
 /// Returns normalized density of states of a Bethe lattice with a finite coordination
@@ -464,6 +514,7 @@ pub fn bethe(z: u32, eps: f64, t: f64) -> SpectralFunction {
 //
 
 /// Density of states of a square lattice.
+#[derive(Clone)]
 struct SquareDOS {
     eps: f64,
     t: f64,
@@ -517,6 +568,14 @@ impl ContinuousSF for SquareDOS {
     fn singularities(&self) -> &[Singularity] {
         &self.singularity
     }
+    fn shifted(&self, by: f64) -> Box<dyn ContinuousSF> {
+        Box::new(SquareDOS {
+            eps: self.eps + by,
+            edges: self.edges.shifted(by),
+            singularity: self.singularity.each_ref().map(|s| s.shifted(by)),
+            ..self.clone()
+        })
+    }
 }
 
 /// Returns normalized density of states of a square lattice.
@@ -538,6 +597,7 @@ pub fn square(eps: f64, t: f64) -> SpectralFunction {
 //
 
 /// Density of states of a triangular lattice.
+#[derive(Clone)]
 struct TriangularDOS {
     eps: f64,
     t: f64,
@@ -605,6 +665,14 @@ impl ContinuousSF for TriangularDOS {
     fn singularities(&self) -> &[Singularity] {
         &self.singularity
     }
+    fn shifted(&self, by: f64) -> Box<dyn ContinuousSF> {
+        Box::new(TriangularDOS {
+            eps: self.eps + by,
+            edges: self.edges.shifted(by),
+            singularity: self.singularity.each_ref().map(|s| s.shifted(by)),
+            ..self.clone()
+        })
+    }
 }
 
 /// Returns normalized density of states of a triangular lattice.
@@ -645,6 +713,7 @@ pub fn triangular(eps: f64, t: f64) -> SpectralFunction {
 /// $\epsilon$ in units of $t$. The DOS is, therefore, that of the triangular lattice at
 /// $x = 3 - ((\omega-\epsilon)/t)^2$, reweighted by the Jacobian $|\omega-\epsilon|/t$ of
 /// that substitution.
+#[derive(Clone)]
 struct HoneycombDOS {
     eps: f64,
     t: f64,
@@ -718,6 +787,14 @@ impl ContinuousSF for HoneycombDOS {
     }
     fn singularities(&self) -> &[Singularity] {
         &self.singularities
+    }
+    fn shifted(&self, by: f64) -> Box<dyn ContinuousSF> {
+        Box::new(HoneycombDOS {
+            eps: self.eps + by,
+            edges: self.edges.shifted(by),
+            singularities: self.singularities.each_ref().map(|s| s.shifted(by)),
+            ..self.clone()
+        })
     }
 }
 
@@ -795,6 +872,7 @@ pub fn kagome(eps: f64, t: f64) -> SpectralFunction {
 /// measured from $\epsilon$ in units of $2t$. The DOS is, therefore, that of the square
 /// lattice at $x = u^2 - 1$, reweighted by $|u|$, half the Jacobian of that substitution,
 /// the other half splitting the weight between the two bands.
+#[derive(Clone)]
 struct LiebDOS {
     eps: f64,
     t: f64,
@@ -860,6 +938,14 @@ impl ContinuousSF for LiebDOS {
     }
     fn singularities(&self) -> &[Singularity] {
         &self.singularities
+    }
+    fn shifted(&self, by: f64) -> Box<dyn ContinuousSF> {
+        Box::new(LiebDOS {
+            eps: self.eps + by,
+            edges: self.edges.shifted(by),
+            singularities: self.singularities.each_ref().map(|s| s.shifted(by)),
+            ..self.clone()
+        })
     }
 }
 
