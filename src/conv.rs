@@ -1,8 +1,9 @@
 //! Convolution of the continuous parts of two spectral functions.
 
 use bilby::adaptive_integrate_with_breaks;
+use special::Beta;
 
-use crate::singularity::Singularity;
+use crate::singularity::{AsymptTerm, Singularity};
 use crate::{ContinuousSF, SpectralFunction, non_smooth};
 
 /// Value of a single continuous contribution, zero where it does not reach and where
@@ -169,6 +170,101 @@ pub fn breakpoints(a: &SpectralFunction, b: &SpectralFunction) -> Vec<f64> {
     sums.sort_unstable_by(f64::total_cmp);
     sums.dedup();
     sums
+}
+
+/// Exponent beyond which a derived term is smooth enough not to be worth carrying.
+const MAX_DERIVED_EXPONENT: f64 = 2.0;
+
+/// Coefficients of $|\omega-\Omega|^r$ in the local form of `csf` just inside the end
+/// `position` of its support.
+///
+/// `None` unless `position` really is that end, the formula below applying only where a
+/// contribution lies on one side of a frequency alone, and unless the form there is a
+/// sum of powers.
+fn edge_powers(csf: &dyn ContinuousSF, position: f64, upper: bool) -> Option<Vec<(f64, f64)>> {
+    let (omega_min, omega_max) = csf.support();
+    if position != if upper { omega_max } else { omega_min } {
+        return None;
+    }
+    let mut terms = Vec::new();
+    // Whatever is not singular at `position` contributes the value it takes there
+    let mut constant = csf.regular(position);
+    for sing in csf.singularities() {
+        if sing.position() == position {
+            terms.extend(sing.power_terms(upper)?);
+        } else {
+            constant += sing.value(position);
+        }
+    }
+    terms.push((0.0, constant));
+    Some(terms)
+}
+
+/// Singularities of $C_A \ast C_B$ derived from the band edges of the two.
+///
+/// Where each factor occupies one side of a frequency alone, the convolution of their
+/// local forms is term by term
+/// $$
+///     c_1 x_+^\alpha \ast c_2 x_+^\beta
+///         = c_1 c_2 B(\alpha+1, \beta+1) \Delta_+^{\alpha+\beta+1}.
+/// $$
+/// One-sided is what the formula rests on, the whole integral running from $0$ to
+/// $\Delta$. A two-sided $|x|^\alpha$ draws terms of the same order from $x < 0$ and
+/// from $x > \Delta$ as well, which for two smooth constants cancel this one exactly,
+/// so applying it there would invent a kink where there is none.
+///
+/// Only the ends of a support are frequencies a contribution lies on one side of, which
+/// is what confines this to the band edges of the result and leaves its interior van
+/// Hove points alone.
+///
+/// The local forms are taken to leading order, the regular part of a factor entering
+/// through the value it takes at the edge and nothing more.
+pub fn singularities(a: &SpectralFunction, b: &SpectralFunction) -> Vec<Singularity> {
+    let mut derived: Vec<(f64, Vec<AsymptTerm>)> = Vec::new();
+    for upper in [false, true] {
+        for (c1, w1) in &a.continuous {
+            for (c2, w2) in &b.continuous {
+                let end = |csf: &dyn ContinuousSF| {
+                    let (lo, hi) = csf.support();
+                    if upper { hi } else { lo }
+                };
+                let (end1, end2) = (end(c1.as_ref()), end(c2.as_ref()));
+                let (Some(f), Some(g)) = (
+                    edge_powers(c1.as_ref(), end1, upper),
+                    edge_powers(c2.as_ref(), end2, upper),
+                ) else {
+                    continue;
+                };
+
+                let mut terms = Vec::new();
+                for &(alpha, c_alpha) in &f {
+                    for &(beta, c_beta) in &g {
+                        let exponent = alpha + beta + 1.0;
+                        if exponent >= MAX_DERIVED_EXPONENT {
+                            continue;
+                        }
+                        let beta_fn = (alpha + 1.0).ln_beta(beta + 1.0).exp();
+                        let c = w1 * w2 * c_alpha * c_beta * beta_fn;
+                        // The term lives inside the support, where two-sided and
+                        // one-sided coincide, the outside carrying no value at all
+                        terms.push(AsymptTerm::power(exponent, c));
+                    }
+                }
+                if terms.is_empty() {
+                    continue;
+                }
+                let position = end1 + end2;
+                match derived.iter_mut().find(|(p, _)| *p == position) {
+                    Some((_, existing)) => existing.extend(terms),
+                    None => derived.push((position, terms)),
+                }
+            }
+        }
+    }
+    derived
+        .into_iter()
+        .map(|(position, terms)| Singularity::new(position, 1.0, terms))
+        .collect()
 }
 
 /// Convolution of the continuous parts of two spectral functions, evaluated by

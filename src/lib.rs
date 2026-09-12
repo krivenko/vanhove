@@ -283,7 +283,8 @@ impl SpectralFunction {
     /// the frequencies where the result stops being smooth are derived, the asymptotics
     /// there are not, and the regular part is interpolated across them.
     pub fn conv(&self, other: &SpectralFunction) -> SpectralFunction {
-        self.conv_with(other, vec![], None)
+        let derived = crate::conv::singularities(self, other);
+        self.conv_with(other, derived, None)
     }
 
     /// Convolution with another spectral function, given the singular structure
@@ -961,6 +962,50 @@ mod tests {
                 known.continuous_at(omega),
                 epsilon = 1e-6 * peak
             );
+        }
+    }
+
+    #[test]
+    fn conv_derives_its_band_edges() {
+        use special::Gamma;
+
+        // Two one-sided power laws convolve into a third, exactly:
+        // c_1 x^{r_1} ⊛ c_2 x^{r_2} = c_1 c_2 B(r_1+1, r_2+1) x^{r_1+r_2+1}
+        let w = 2.0f64;
+        for (r1, r2) in [(-0.5f64, 0.5f64), (-0.5, -0.5), (0.0, 0.0), (-0.9, -0.9)] {
+            let convolved = powerlaw(0.0, r1, w).conv(&powerlaw(0.0, r2, w));
+            let prefactor = (r1 + 1.0) * (r2 + 1.0) / w.powf(r1 + r2 + 2.0);
+            let beta =
+                Gamma::gamma(r1 + 1.0) * Gamma::gamma(r2 + 1.0) / Gamma::gamma(r1 + r2 + 2.0);
+
+            let singularities =
+                crate::conv::singularities(&powerlaw(0.0, r1, w), &powerlaw(0.0, r2, w));
+            let edge = singularities
+                .iter()
+                .find(|s| s.position() == 0.0)
+                .expect("the lower band edge is derived");
+
+            // The derived asymptotics carries the Beta coefficient, and with it the
+            // whole of A(ω) near the edge, the regular part vanishing there
+            for x in [1e-4f64, 1e-3, 1e-2] {
+                let exact = prefactor * beta * x.powf(r1 + r2 + 1.0);
+                assert_relative_eq!(edge.value(x), exact, max_relative = 1e-12);
+                assert_relative_eq!(convolved.continuous_at(x), exact, max_relative = 1e-9);
+            }
+        }
+
+        // The chain against the square lattice gives the simple cubic band edges, whose
+        // coefficient is known: an inverse square root meeting the value the square
+        // lattice takes at its own edge
+        let t = 1.0f64;
+        let singularities = crate::conv::singularities(&chain(0.0, t), &square(0.0, t));
+        assert_eq!(singularities.len(), 2);
+        assert_eq!(singularities[0].position(), -6.0 * t);
+        assert_eq!(singularities[1].position(), 6.0 * t);
+        let expected = 1.0 / (4.0 * PI.powi(2) * t.powf(1.5));
+        for h in [1e-5f64, 1e-7] {
+            let coefficient = singularities[0].value(-6.0 * t + h) / h.sqrt();
+            assert_relative_eq!(coefficient, expected, max_relative = 1e-4);
         }
     }
 

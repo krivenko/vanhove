@@ -178,6 +178,24 @@ impl Singularity {
         self.terms.iter().map(|t| t.value(d < 0.0, u, ln_u)).sum()
     }
 
+    /// Coefficients of $|\omega-\Omega_p|^r$ in $S_p$ on one side of $\Omega_p$, the
+    /// scale folded in.
+    ///
+    /// `None` where a logarithm makes $S_p$ more than a sum of powers.
+    pub(crate) fn power_terms(&self, below: bool) -> Option<Vec<(f64, f64)>> {
+        if self.terms.iter().any(|t| t.log_power > 0) {
+            return None;
+        }
+        let coeff = |t: &AsymptTerm| if below { t.c_below } else { t.c_above };
+        // c u^r = c s^{-r} |ω-Ω_p|^r
+        Some(
+            self.terms
+                .iter()
+                .map(|t| (t.exponent, coeff(t) * self.inv_scale.powf(t.exponent)))
+                .collect(),
+        )
+    }
+
     /// $\int_{\omega_{min}}^{\omega_{max}} S_p(\omega)d\omega$ in closed form.
     pub fn integral(&self, omega_min: f64, omega_max: f64) -> f64 {
         if self.is_trivial() {
