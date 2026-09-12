@@ -139,6 +139,14 @@ impl Singularity {
         self.terms.is_empty()
     }
 
+    /// The same singularity displaced in frequency by `by`.
+    pub fn shifted(&self, by: f64) -> Singularity {
+        Singularity {
+            position: self.position + by,
+            ..self.clone()
+        }
+    }
+
     /// $S_p(\omega)$.
     ///
     /// Diverges at $\Omega_p$ unless every term stays bounded there.

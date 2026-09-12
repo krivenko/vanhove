@@ -151,6 +151,20 @@ impl ContinuousSF for Interpolated {
     fn singularities(&self) -> &[Singularity] {
         &self.singularities
     }
+    fn shifted(&self, by: f64) -> Box<dyn ContinuousSF> {
+        Box::new(Interpolated {
+            support: (self.support.0 + by, self.support.1 + by),
+            panels: self
+                .panels
+                .iter()
+                .map(|p| Panel {
+                    mid: p.mid + by,
+                    ..p.clone()
+                })
+                .collect(),
+            singularities: self.singularities.iter().map(|s| s.shifted(by)).collect(),
+        })
+    }
 }
 
 #[cfg(test)]
@@ -180,6 +194,9 @@ mod tests {
         }
         fn breakpoints(&self) -> &[f64] {
             &self.breakpoints
+        }
+        fn shifted(&self, _by: f64) -> Box<dyn ContinuousSF> {
+            unimplemented!("the test double is never displaced")
         }
     }
 

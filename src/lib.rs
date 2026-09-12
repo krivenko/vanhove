@@ -51,6 +51,8 @@ trait ContinuousSF: Send + Sync {
     fn breakpoints(&self) -> &[f64] {
         &[]
     }
+    /// The same spectral function displaced in frequency by `by`.
+    fn shifted(&self, by: f64) -> Box<dyn ContinuousSF>;
 }
 
 /// Spectral function as a weighted sum of discrete resonances and continuous
@@ -114,6 +116,22 @@ impl Sub for SpectralFunction {
         self + (-rhs)
     }
 }
+/// Continuous contributions of the convolution of `discrete` with the continuous part
+/// of `sf`.
+fn conv_discrete_continuous(
+    discrete: &DiscreteSF,
+    sf: &SpectralFunction,
+) -> Vec<(Arc<dyn ContinuousSF>, f64)> {
+    let mut contributions = Vec::with_capacity(discrete.len() * sf.continuous.len());
+    // A resonance displaces every band to its position and scales it by its weight
+    for (csf, w) in &sf.continuous {
+        for res in discrete.iter() {
+            contributions.push((Arc::from(csf.shifted(res.eps)), w * res.weight));
+        }
+    }
+    contributions
+}
+
 impl SpectralFunction {
     /// Build a `SpectralFunction` from a discrete spectral function and a list of
     /// continuous contributions with their weights.
@@ -203,6 +221,18 @@ impl SpectralFunction {
             })
             .collect();
         SpectralFunction::from_discrete_continuous(self.discrete.clone(), continuous)
+    }
+
+    /// Convolution with another spectral function,
+    /// $\int A(\nu) B(\omega - \nu) d\nu$.
+    pub fn conv(&self, other: &SpectralFunction) -> SpectralFunction {
+        assert!(
+            self.continuous.is_empty() || other.continuous.is_empty(),
+            "convolution of two continuous spectral functions is not supported yet"
+        );
+        let mut continuous = conv_discrete_continuous(&self.discrete, other);
+        continuous.extend(conv_discrete_continuous(&other.discrete, self));
+        SpectralFunction::from_discrete_continuous(self.discrete.conv(&other.discrete), continuous)
     }
 
     /// Total spectral weight.
@@ -377,7 +407,7 @@ impl SpectralFunction {
 #[cfg(test)]
 mod tests {
     use crate::SpectralFunction;
-    use crate::models::{chain, discrete, gaussian, honeycomb, lieb, semicircle, square};
+    use crate::models::*;
     use approx::assert_relative_eq;
     use std::f64::consts::PI;
 
@@ -682,6 +712,108 @@ mod tests {
         let fast_mixed = mixed.precomputed(None);
         assert_eq!(fast_mixed.discrete().len(), 1);
         assert_relative_eq!(fast_mixed.total_weight(), 1.0, epsilon = 1e-14);
+    }
+
+    #[test]
+    fn conv_discrete_continuous() {
+        // A unit resonance displaces a band to its position
+        let shifted = discrete(&[1.5], &[1.0]).conv(&semicircle(0.0, 2.0));
+        let reference = semicircle(1.5, 2.0);
+        assert_eq!(shifted.support(), reference.support());
+        for omega in [-0.5, 0.4, 1.5, 2.6, 3.5] {
+            assert_relative_eq!(
+                shifted.continuous_at(omega),
+                reference.continuous_at(omega),
+                max_relative = 1e-14
+            );
+        }
+
+        // Singular points travel with the band
+        let shifted = discrete(&[2.0], &[1.0]).conv(&square(0.0, 1.0));
+        assert_eq!(shifted.continuous_at(2.0), f64::INFINITY);
+        assert_eq!(shifted.support(), Some((-2.0, 6.0)));
+
+        // Weight is multiplicative, and the operands need not be normalized
+        let a = 0.5 * discrete(&[-1.0, 2.0], &[0.25, 0.75]);
+        let b = 3.0 * chain(0.0, 1.0);
+        let c = a.conv(&b);
+        assert_relative_eq!(
+            c.total_weight(),
+            a.total_weight() * b.total_weight(),
+            max_relative = 1e-14
+        );
+
+        // One band per resonance, each displaced to its own position
+        assert_eq!(c.continuous.len(), 2);
+        assert_eq!(c.support(), Some((-3.0, 4.0)));
+
+        // Convolution commutes
+        for omega in [-2.5, 0.0, 1.3, 3.5] {
+            assert_relative_eq!(
+                c.continuous_at(omega),
+                b.conv(&a).continuous_at(omega),
+                max_relative = 1e-14
+            );
+        }
+
+        // Moments obey M_n = Σ_k C(n,k) M_k^A M_{n-k}^B
+        let moment = |sf: &SpectralFunction, n: i32| sf.integrate(|w| w.powi(n), None).unwrap();
+        let binomial = |n: usize, k: usize| -> f64 {
+            (1..=k).map(|i| (n - k + i) as f64 / i as f64).product()
+        };
+        for n in 0..=4usize {
+            let reference: f64 = (0..=n)
+                .map(|k| binomial(n, k) * moment(&a, k as i32) * moment(&b, (n - k) as i32))
+                .sum();
+            assert_relative_eq!(moment(&c, n as i32), reference, max_relative = 1e-9);
+        }
+    }
+
+    #[test]
+    fn conv_shifts_every_model() {
+        // Displacing a contribution must move all of it: support, regular part,
+        // singular points and breakpoints alike
+        let by = 1.25f64;
+        let unit = discrete(&[by], &[1.0]);
+        let models = [
+            chain(0.5, 1.0),
+            semicircle(0.5, 2.0),
+            bethe(4, 0.5, 1.0),
+            powerlaw(0.5, -0.5, 2.0),
+            powerlaw(0.5, 2.5, 2.0),
+            pseudogap(0.5, 0.5, 2.0),
+            pseudogap(0.5, 2.5, 2.0),
+            square(0.5, 1.0),
+            triangular(0.5, 1.0),
+            honeycomb(0.5, 1.0),
+            lieb(0.5, 1.0),
+            kagome(0.5, 1.0),
+            gaussian(0.5, 1.0),
+            flat(0.5, 2.0, 0.0),
+            flat(0.5, 2.0, 0.3),
+            square(0.5, 1.0).precomputed(None),
+        ];
+        for dos in models {
+            let moved = unit.conv(&dos);
+            let (lo, hi) = dos.support().unwrap();
+            let (lo, hi) = (lo.max(-20.0), hi.min(20.0));
+            for i in 0..=40 {
+                let omega = lo + (hi - lo) * (i as f64) / 40.0;
+                let (before, after) = (dos.continuous_at(omega), moved.continuous_at(omega + by));
+                assert_relative_eq!(after, before, max_relative = 1e-12, epsilon = 1e-300);
+            }
+            assert_relative_eq!(
+                moved.total_weight(),
+                dos.total_weight(),
+                max_relative = 1e-14
+            );
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "two continuous spectral functions")]
+    fn conv_two_continuous() {
+        let _ = chain(0.0, 1.0).conv(&square(0.0, 1.0));
     }
 
     #[test]
