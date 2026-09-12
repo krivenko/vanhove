@@ -2,6 +2,7 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+mod conv;
 pub mod discrete;
 mod interp;
 pub mod models;
@@ -15,6 +16,7 @@ use std::sync::Arc;
 use bilby::QuadratureError;
 use num_complex::Complex64;
 
+use crate::conv::Convolution;
 use crate::discrete::DiscreteSF;
 use crate::interp::Interpolated;
 use crate::singularity::{Singularity, Strength};
@@ -116,6 +118,14 @@ impl Sub for SpectralFunction {
         self + (-rhs)
     }
 }
+/// Frequencies where a continuous spectral function is not smooth.
+fn non_smooth(csf: &dyn ContinuousSF) -> impl Iterator<Item = f64> + '_ {
+    csf.singularities()
+        .iter()
+        .map(|s| s.position)
+        .chain(csf.breakpoints().iter().copied())
+}
+
 /// Continuous contributions of the convolution of `discrete` with the continuous part
 /// of `sf`.
 fn conv_discrete_continuous(
@@ -228,10 +238,36 @@ impl SpectralFunction {
     pub fn conv(&self, other: &SpectralFunction) -> SpectralFunction {
         assert!(
             self.continuous.is_empty() || other.continuous.is_empty(),
-            "convolution of two continuous spectral functions is not supported yet"
+            "the singular structure of a continuous convolution must be supplied"
         );
+        self.conv_with(other, vec![], vec![], None)
+    }
+
+    /// Convolution with another spectral function, given the singular structure
+    /// $C_A \ast C_B$ is known to have.
+    ///
+    /// `singularities` and `breakpoints` describe the convolution of the two
+    /// continuous parts alone, the other three terms carrying their own.
+    pub(crate) fn conv_with(
+        &self,
+        other: &SpectralFunction,
+        singularities: Vec<Singularity>,
+        breakpoints: Vec<f64>,
+        tol: Option<f64>,
+    ) -> SpectralFunction {
+        // Every resonance of one operand against the continuous part of the other
         let mut continuous = conv_discrete_continuous(&self.discrete, other);
         continuous.extend(conv_discrete_continuous(&other.discrete, self));
+
+        // The two continuous parts against each other, evaluated by quadrature and
+        // interpolated over the singular structure given
+        if !self.continuous.is_empty() && !other.continuous.is_empty() {
+            let tol = tol.unwrap_or(Interpolated::DEFAULT_TOL);
+            let convolution = Convolution::new(self, other, singularities, breakpoints, tol);
+            let interpolated = Interpolated::new(&convolution, Some(tol));
+            continuous.push((Arc::new(interpolated) as Arc<dyn ContinuousSF>, 1.0));
+        }
+
         SpectralFunction::from_discrete_continuous(self.discrete.conv(&other.discrete), continuous)
     }
 
@@ -408,7 +444,7 @@ impl SpectralFunction {
 mod tests {
     use crate::SpectralFunction;
     use crate::models::*;
-    use approx::assert_relative_eq;
+    use approx::{assert_abs_diff_eq, assert_relative_eq};
     use std::f64::consts::PI;
 
     #[test]
@@ -811,9 +847,69 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "two continuous spectral functions")]
+    #[should_panic(expected = "singular structure of a continuous convolution")]
     fn conv_two_continuous() {
         let _ = chain(0.0, 1.0).conv(&square(0.0, 1.0));
+    }
+
+    #[test]
+    fn conv_continuous_continuous() {
+        // Two sharp-edged boxes of half-width d convolve into a triangle,
+        // (2d - |ω|)/(4d^2), with a kink at the centre and none elsewhere
+        let d = 1.5f64;
+        let box_dos = flat(0.0, d, 0.0);
+        let triangle = box_dos.conv_with(&box_dos, vec![], vec![0.0], None);
+        assert_eq!(triangle.support(), Some((-2.0 * d, 2.0 * d)));
+
+        let reference = |omega: f64| (2.0 * d - omega.abs()) / (4.0 * d * d);
+        for i in 0..=40 {
+            let omega = -2.0 * d + 4.0 * d * (i as f64) / 40.0;
+            assert_abs_diff_eq!(
+                triangle.continuous_at(omega),
+                reference(omega),
+                epsilon = 1e-12
+            );
+        }
+
+        // Weight is multiplicative here as everywhere
+        assert_relative_eq!(triangle.total_weight(), 1.0, max_relative = 1e-12);
+
+        // Without the kink reported, the fit has to resolve it inside a panel
+        let unsplit = box_dos.conv_with(&box_dos, vec![], vec![], None);
+        let worst = (0..=40)
+            .map(|i| {
+                let omega = -2.0 * d + 4.0 * d * (i as f64) / 40.0;
+                (unsplit.continuous_at(omega) - reference(omega)).abs()
+            })
+            .fold(0.0f64, f64::max);
+        assert!(worst > 1e-6, "the kink cost nothing: {worst:.2e}");
+    }
+
+    #[test]
+    fn conv_continuous_moments() {
+        // A band against a box. The result kinks wherever an edge of one meets an
+        // edge of the other, at -1.5 and 0.5 inside the support [-3.5, 2.5].
+        let a = semicircle(0.5, 2.0);
+        let b = flat(-1.0, 1.0, 0.0);
+        let c = a.conv_with(&b, vec![], vec![-1.5, 0.5], None);
+        assert_eq!(c.support(), Some((-3.5, 2.5)));
+
+        assert_relative_eq!(
+            c.total_weight(),
+            a.total_weight() * b.total_weight(),
+            max_relative = 1e-10
+        );
+
+        let moment = |sf: &SpectralFunction, n: i32| sf.integrate(|w| w.powi(n), None).unwrap();
+        let binomial = |n: usize, k: usize| -> f64 {
+            (1..=k).map(|i| (n - k + i) as f64 / i as f64).product()
+        };
+        for n in 0..=4usize {
+            let reference: f64 = (0..=n)
+                .map(|k| binomial(n, k) * moment(&a, k as i32) * moment(&b, (n - k) as i32))
+                .sum();
+            assert_relative_eq!(moment(&c, n as i32), reference, max_relative = 1e-8);
+        }
     }
 
     #[test]

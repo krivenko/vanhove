@@ -1,8 +1,8 @@
 //! Chebyshev interpolation of the regular part of a spectral function.
 
-use crate::ContinuousSF;
 use crate::singularity::Singularity;
 use crate::util::{chebyshev_coeffs, clenshaw_chebyshev};
+use crate::{ContinuousSF, non_smooth};
 
 /// Chebyshev expansion of a function over one interval.
 #[derive(Debug, Clone)]
@@ -80,7 +80,7 @@ pub struct Interpolated {
 
 impl Interpolated {
     /// Default relative tolerance of the fit.
-    const DEFAULT_TOL: f64 = 1e-12;
+    pub const DEFAULT_TOL: f64 = 1e-12;
 
     /// Interpolate the regular part of `csf`.
     ///
@@ -101,13 +101,8 @@ impl Interpolated {
 
         // Panel boundaries: the ends of the support, and every point strictly between
         // them where R(ω) may fail to be smooth
-        let mut breaks: Vec<f64> = csf
-            .singularities()
-            .iter()
-            .map(|s| s.position)
-            .chain(csf.breakpoints().iter().copied())
-            .filter(|&p| p > omega_min && p < omega_max)
-            .collect();
+        let mut breaks: Vec<f64> = non_smooth(csf).collect();
+        breaks.retain(|&p| p > omega_min && p < omega_max);
         breaks.push(omega_min);
         breaks.push(omega_max);
         breaks.sort_unstable_by(f64::total_cmp);
