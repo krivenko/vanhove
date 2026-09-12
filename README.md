@@ -43,6 +43,7 @@ The numerical work is delegated to the
 | `chain(eps, t)`             | Linear chain, square-root divergent edges                           |
 | `bethe(z, eps, t)`          | Bethe lattice of coordination number `z`, square-root band edges    |
 | `square(eps, t)`            | Square lattice, logarithmic van Hove peak                           |
+| `simple_cubic(eps, t)`      | Simple cubic lattice, square-root cusps at the saddle points        |
 | `triangular(eps, t)`        | Triangular lattice, asymmetric with a logarithmic peak              |
 | `honeycomb(eps, t)`         | Honeycomb lattice, two logarithmic peaks about a Dirac point        |
 | `kagome(eps, t)`            | Kagome lattice, flat band $\delta$-peak at a band edge              |

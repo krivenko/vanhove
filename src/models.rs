@@ -1016,6 +1016,52 @@ pub fn lieb(eps: f64, t: f64) -> SpectralFunction {
     )
 }
 
+//
+// Simple cubic lattice DOS
+//
+
+/// Returns normalized density of states of a simple cubic lattice.
+///
+/// The simple cubic lattice is defined by the hopping constant `t` and the local energy
+/// level `eps`. The density of states is derived from the dispersion law
+/// $\varepsilon(k) = \epsilon - 2t[\cos(k_x) + \cos(k_y) + \cos(k_z)]$, and has no
+/// closed form. It is computed as a convolution of the linear chain and square lattice
+/// densities of states, which the dispersion splits into,
+/// $$
+///     A(\omega) = \int A_\mathrm{chain}(\nu) A_\mathrm{square}(\omega-\nu) d\nu,
+/// $$
+/// with the regular part interpolated and the four van Hove singularities kept in
+/// closed form. None of the four diverges: $A(\omega)$ is finite throughout, its
+/// derivative diverging at the band edges $\epsilon \pm 6t$ and at the saddle points
+/// $\epsilon \pm 2t$,
+/// $$
+///     A(\omega) \simeq \frac{\sqrt{\omega-\epsilon+6t}}{4\pi^2 t^{3/2}}, \qquad
+///     A(\omega) \simeq A(\epsilon-2t)
+///         - \frac{3\sqrt{\epsilon-2t-\omega}}{4\pi^2 t^{3/2}}\theta(\epsilon-2t-\omega),
+/// $$
+/// the upper half following by the symmetry of the band about $\epsilon$.
+pub fn simple_cubic(eps: f64, t: f64) -> SpectralFunction {
+    assert!(t > 0.0, "hopping constant must be positive");
+    // Coefficients of the band edge and saddle point cusps, the latter counting the
+    // three equivalent critical points of its star. Both are written for u = |ω-Ω_p|/t.
+    let edge = 1.0 / (4.0 * PI.powi(2) * t);
+    let saddle = 3.0 * edge;
+    let cusp = |position: f64, c_below: f64, c_above: f64| {
+        Singularity::new(position, t, vec![AsymptTerm::sided(0.5, c_below, c_above)])
+    };
+    chain(eps, t).conv_with(
+        &square(0.0, t),
+        vec![
+            cusp(eps - 6.0 * t, 0.0, edge),
+            cusp(eps - 2.0 * t, -saddle, 0.0),
+            cusp(eps + 2.0 * t, 0.0, -saddle),
+            cusp(eps + 6.0 * t, edge, 0.0),
+        ],
+        vec![],
+        None,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1098,6 +1144,79 @@ mod tests {
         assert_eq!(singularities.len(), expected.len());
         for (sing, &e) in singularities.iter().zip(expected) {
             assert_relative_eq!(sing.integral(omega_min, omega_max), e, max_relative = 1e-14);
+        }
+    }
+
+    #[test]
+    fn simple_cubic() {
+        let eps = 0.5f64;
+        let t = 2.0f64;
+
+        // Central moments count the closed walks on the lattice: μ_2 = 6t^2 counts the
+        // six neighbours, and μ_4, μ_6 follow from the chain and square moments through
+        // the binomial rule for a convolution.
+        let moments_ref = central_to_moments(
+            eps,
+            even_central_moments(6.0 * t.powi(2), 90.0 * t.powi(4), 1860.0 * t.powi(6)),
+        );
+
+        let dos = models::simple_cubic(eps, t);
+        assert_eq!(dos.support(), Some((eps - 6.0 * t, eps + 6.0 * t)));
+        assert!(dos.discrete().is_empty());
+        for (order, moment_ref) in moments_ref.iter().enumerate() {
+            let moment = compute_moment(&dos, order as i32);
+            assert_relative_eq!(moment, moment_ref, max_relative = 1e-10);
+        }
+    }
+
+    #[test]
+    fn simple_cubic_van_hove() {
+        use std::f64::consts::PI;
+
+        let (eps, t) = (0.5f64, 2.0f64);
+        let dos = models::simple_cubic(eps, t);
+
+        // A(ω) stays finite throughout, the band edges included
+        for omega in [
+            eps - 6.0 * t,
+            eps - 2.0 * t,
+            eps,
+            eps + 2.0 * t,
+            eps + 6.0 * t,
+        ] {
+            assert!(dos.continuous_at(omega).is_finite());
+        }
+        assert_eq!(dos.continuous_at(eps - 6.5 * t), 0.0);
+        assert_eq!(dos.continuous_at(eps + 6.5 * t), 0.0);
+
+        // The band is symmetric about eps
+        for x in [0.3, 1.7, 3.0, 5.5] {
+            assert_relative_eq!(
+                dos.continuous_at(eps + x * t),
+                dos.continuous_at(eps - x * t),
+                max_relative = 1e-7
+            );
+        }
+
+        // Square-root rise off the lower band edge
+        let edge = 1.0 / (4.0 * PI.powi(2) * t.powf(1.5));
+        for h in [1e-3f64, 1e-4, 1e-5] {
+            let omega = eps - 6.0 * t + h;
+            assert_relative_eq!(
+                dos.continuous_at(omega) / h.sqrt(),
+                edge,
+                max_relative = 1e-3
+            );
+        }
+
+        // A one-sided cusp at each saddle point, three times as steep and turned down
+        let saddle = -3.0 * edge;
+        let a0 = dos.continuous_at(eps - 2.0 * t);
+        for h in [1e-3f64, 1e-4, 1e-5] {
+            let below = (dos.continuous_at(eps - 2.0 * t - h) - a0) / h.sqrt();
+            let above = (dos.continuous_at(eps - 2.0 * t + h) - a0) / h.sqrt();
+            assert_relative_eq!(below, saddle, max_relative = 1e-2);
+            assert!(above.abs() < 0.1 * saddle.abs());
         }
     }
 

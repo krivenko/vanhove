@@ -12,6 +12,12 @@ fn value_at(csf: &dyn ContinuousSF, omega: f64) -> f64 {
 }
 
 /// $\int C_1(\nu) C_2(\omega-\nu) d\nu$ over the overlap of the two supports.
+///
+/// The singular parts of $C_1$ are handled the way [`SpectralFunction::integrate()`]
+/// handles them, by subtracting the value of the other factor at $\Omega_p$ and
+/// restoring it through $\int S_p$ in closed form. Handing the bare product to the
+/// quadrature instead leaves an inverse square root sitting on an end of the interval,
+/// where Gauss-Kronrod converges too slowly to notice it is not converging.
 fn pair(c1: &dyn ContinuousSF, c2: &dyn ContinuousSF, omega: f64, tol: f64) -> f64 {
     let (a1, b1) = c1.support();
     let (a2, b2) = c2.support();
@@ -28,19 +34,42 @@ fn pair(c1: &dyn ContinuousSF, c2: &dyn ContinuousSF, omega: f64, tol: f64) -> f
     breaks.sort_unstable_by(f64::total_cmp);
     breaks.dedup();
 
-    adaptive_integrate_with_breaks(
-        |nu| {
-            // The product is integrable where a factor is not, and the singular points
-            // themselves carry no weight
-            let v = value_at(c1, nu) * value_at(c2, omega - nu);
-            if v.is_finite() { v } else { 0.0 }
-        },
-        lo,
-        hi,
-        &breaks,
-        tol,
-    )
-    .map_or(0.0, |r| r.value)
+    let quad = |f: &dyn Fn(f64) -> f64| {
+        adaptive_integrate_with_breaks(f, lo, hi, &breaks, tol).map_or(0.0, |r| r.value)
+    };
+    // C_2 reflected about omega, and zero where C_2 does not reach
+    let other = |nu: f64| {
+        let mu = omega - nu;
+        if mu < a2 || mu > b2 {
+            return 0.0;
+        }
+        let v = value_at(c2, mu);
+        // The singular points of C_2 carry no weight
+        if v.is_finite() { v } else { 0.0 }
+    };
+
+    let mut total = quad(&|nu| c1.regular(nu) * other(nu));
+    for sing in c1.singularities() {
+        if sing.is_trivial() {
+            continue;
+        }
+        let position = sing.position;
+        if position < lo || position > hi {
+            // S_p stays bounded over an overlap it does not reach into
+            total += quad(&|nu| sing.value(nu) * other(nu));
+            continue;
+        }
+        let anchor = other(position);
+        total += quad(&|nu| {
+            if nu == position {
+                0.0
+            } else {
+                sing.value(nu) * (other(nu) - anchor)
+            }
+        });
+        total += anchor * sing.integral(lo, hi);
+    }
+    total
 }
 
 /// Convolution of the continuous parts of two spectral functions, evaluated by

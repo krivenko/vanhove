@@ -12,8 +12,10 @@ pub struct AsymptTerm {
     exponent: f64,
     /// Power $m \in \\{0, 1\\}$ of the logarithmic factor.
     log_power: u8,
-    /// Coefficient $c$.
-    c: f64,
+    /// Coefficient $c$ below $\Omega_p$.
+    c_below: f64,
+    /// Coefficient $c$ above $\Omega_p$.
+    c_above: f64,
     /// Precomputed dispatch for $u^r$.
     pow: PowKind,
 }
@@ -21,15 +23,27 @@ pub struct AsymptTerm {
 impl AsymptTerm {
     /// $c u^r$.
     pub fn power(exponent: f64, c: f64) -> AsymptTerm {
-        AsymptTerm::make(exponent, 0, c)
+        AsymptTerm::make(exponent, 0, c, c)
     }
 
     /// $-c\ln u$, so that $c > 0$ describes a peak.
     pub fn log(c: f64) -> AsymptTerm {
-        AsymptTerm::make(0.0, 1, -c)
+        AsymptTerm::make(0.0, 1, -c, -c)
     }
 
-    fn make(exponent: f64, log_power: u8, c: f64) -> AsymptTerm {
+    /// $c^\pm u^r$, with a coefficient of its own on either side of $\Omega_p$.
+    ///
+    /// Restricted to $r > 0$, where the term vanishes at $\Omega_p$: one that survives
+    /// there has to approach the same value from either side.
+    pub fn sided(exponent: f64, c_below: f64, c_above: f64) -> AsymptTerm {
+        assert!(
+            exponent > 0.0,
+            "a side-dependent term must vanish at the singular point"
+        );
+        AsymptTerm::make(exponent, 0, c_below, c_above)
+    }
+
+    fn make(exponent: f64, log_power: u8, c_below: f64, c_above: f64) -> AsymptTerm {
         assert!(exponent > -1.0, "asymptotics exponent must satisfy r > -1");
         assert!(
             log_power <= 1,
@@ -39,20 +53,22 @@ impl AsymptTerm {
             // -0.0 would sort below +0.0 in `Strength`, and the two are the same exponent
             exponent: if exponent == 0.0 { 0.0 } else { exponent },
             log_power,
-            c,
+            c_below,
+            c_above,
             pow: PowKind::of(exponent),
         }
     }
 
-    /// Value of the term at $u$, given $\ln u$.
-    fn value(&self, u: f64, ln_u: f64) -> f64 {
-        let v = self.c * self.pow.eval(u);
+    /// Value of the term at $u$, given $\ln u$ and the side of $\Omega_p$.
+    fn value(&self, below: bool, u: f64, ln_u: f64) -> f64 {
+        let c = if below { self.c_below } else { self.c_above };
+        let v = c * self.pow.eval(u);
         if self.log_power == 0 { v } else { v * ln_u }
     }
 
     /// Integral of the term over one side of $\Omega_p$ of length `l` in units of $u$,
     /// $\int_0^l c u^r \ln^m u\\, du$.
-    fn half_integral(&self, l: f64) -> f64 {
+    fn half_integral(&self, c: f64, l: f64) -> f64 {
         // The side is empty when Ω_p sits at that end of the support
         if l == 0.0 {
             return 0.0;
@@ -60,9 +76,9 @@ impl AsymptTerm {
         let rp1 = self.exponent + 1.0;
         let lp = l.powf(rp1);
         if self.log_power == 0 {
-            self.c * lp / rp1
+            c * lp / rp1
         } else {
-            self.c * lp * (l.ln() / rp1 - 1.0 / (rp1 * rp1))
+            c * lp * (l.ln() / rp1 - 1.0 / (rp1 * rp1))
         }
     }
 
@@ -151,9 +167,10 @@ impl Singularity {
     ///
     /// Diverges at $\Omega_p$ unless every term stays bounded there.
     pub fn value(&self, omega: f64) -> f64 {
-        let u = (omega - self.position).abs() * self.inv_scale;
+        let d = omega - self.position;
+        let u = d.abs() * self.inv_scale;
         let ln_u = u.ln();
-        self.terms.iter().map(|t| t.value(u, ln_u)).sum()
+        self.terms.iter().map(|t| t.value(d < 0.0, u, ln_u)).sum()
     }
 
     /// $\int_{\omega_{min}}^{\omega_{max}} S_p(\omega)d\omega$ in closed form.
@@ -171,7 +188,7 @@ impl Singularity {
         // The half-integrals are taken over u, and dω = s du restores the scale
         self.terms
             .iter()
-            .map(|t| t.half_integral(below) + t.half_integral(above))
+            .map(|t| t.half_integral(t.c_below, below) + t.half_integral(t.c_above, above))
             .sum::<f64>()
             / self.inv_scale
     }
@@ -187,9 +204,9 @@ impl Singularity {
             .filter(|t| t.exponent == 0.0)
             .map(|t| {
                 if t.log_power == 0 {
-                    t.c
+                    t.c_above
                 } else {
-                    t.c * ln_inv_scale
+                    t.c_above * ln_inv_scale
                 }
             })
             .sum()
@@ -201,9 +218,16 @@ impl Singularity {
         self.terms.iter().filter_map(|t| {
             let strength = t.strength();
             // c u^r tends to sign(c) ∞ for r < 0, while c ln u tends to -sign(c) ∞
-            strength
-                .is_divergent()
-                .then(|| (strength, if t.log_power == 0 { t.c } else { -t.c }))
+            strength.is_divergent().then(|| {
+                (
+                    strength,
+                    if t.log_power == 0 {
+                        t.c_above
+                    } else {
+                        -t.c_above
+                    },
+                )
+            })
         })
     }
 }
