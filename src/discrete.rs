@@ -233,6 +233,19 @@ impl DiscreteSF {
         util::kahan_babushka_neumaier_sum(self.iter().map(|r| r.weight))
     }
 
+    /// Convolution with another discrete spectral function,
+    /// $\int A(\nu) B(\omega - \nu) d\nu$.
+    pub fn conv(&self, other: &DiscreteSF) -> DiscreteSF {
+        self.iter()
+            .flat_map(|a| {
+                other.iter().map(move |b| Resonance {
+                    eps: a.eps + b.eps,
+                    weight: a.weight * b.weight,
+                })
+            })
+            .collect()
+    }
+
     /// Find the resonance located at a given position $\varepsilon$, if any.
     pub fn find(&self, eps: f64) -> Option<&Resonance> {
         // -0.0 is stored as 0.0, so the same canonicalization applies to the needle
@@ -315,6 +328,117 @@ mod tests {
         assert_eq!(sf.len(), 10);
         assert!(sf.iter().all(|r| r.eps >= 0.0));
         assert_relative_eq!(sf.total_weight(), 0.5, epsilon = 1e-15);
+    }
+
+    /// $M_n = \sum_p w_p \varepsilon_p^n$.
+    fn moment(sf: &DiscreteSF, n: i32) -> f64 {
+        sf.iter().map(|r| r.weight * r.eps.powi(n)).sum()
+    }
+
+    fn binomial(n: usize, k: usize) -> f64 {
+        (1..=k).map(|i| (n - k + i) as f64 / i as f64).product()
+    }
+
+    #[test]
+    fn conv() {
+        let a = DiscreteSF::from_iter([
+            Resonance {
+                eps: -1.0,
+                weight: 0.5,
+            },
+            Resonance {
+                eps: 2.0,
+                weight: 0.25,
+            },
+        ]);
+        let b = DiscreteSF::from_iter([
+            Resonance {
+                eps: 0.5,
+                weight: 2.0,
+            },
+            Resonance {
+                eps: 1.5,
+                weight: -1.0,
+            },
+        ]);
+        let c = a.conv(&b);
+
+        // Every pair meets at the sum of its positions, carrying the product of weights
+        assert_eq!(c.len(), 4);
+        let expected = [(-0.5, 1.0), (0.5, -0.5), (2.5, 0.5), (3.5, -0.25)];
+        for (res, (eps, weight)) in c.iter().zip(expected) {
+            assert_relative_eq!(res.eps, eps, epsilon = 1e-14);
+            assert_relative_eq!(res.weight, weight, epsilon = 1e-14);
+        }
+
+        // Weight is multiplicative under convolution
+        assert_relative_eq!(
+            c.total_weight(),
+            a.total_weight() * b.total_weight(),
+            epsilon = 1e-14
+        );
+
+        // Convolution commutes
+        for (l, r) in a.conv(&b).iter().zip(b.conv(&a).iter()) {
+            assert_eq!(l.eps, r.eps);
+            assert_eq!(l.weight, r.weight);
+        }
+
+        // Moments obey M_n = Σ_k C(n,k) M_k^A M_{n-k}^B
+        for n in 0..=4 {
+            let reference: f64 = (0..=n)
+                .map(|k| binomial(n, k) * moment(&a, k as i32) * moment(&b, (n - k) as i32))
+                .sum();
+            assert_relative_eq!(moment(&c, n as i32), reference, epsilon = 1e-12);
+        }
+    }
+
+    #[test]
+    fn conv_degenerate() {
+        let unit = |eps| DiscreteSF::one_resonance(eps, 1.0);
+
+        // A unit resonance at the origin is the identity, one elsewhere shifts
+        let a = DiscreteSF::from_iter([
+            Resonance {
+                eps: -1.0,
+                weight: 0.5,
+            },
+            Resonance {
+                eps: 2.0,
+                weight: 0.25,
+            },
+        ]);
+        for (l, r) in a.conv(&unit(0.0)).iter().zip(a.iter()) {
+            assert_eq!((l.eps, l.weight), (r.eps, r.weight));
+        }
+        for (l, r) in a.conv(&unit(3.0)).iter().zip(a.iter()) {
+            assert_eq!((l.eps, l.weight), (r.eps + 3.0, r.weight));
+        }
+
+        // An empty spectral function annihilates whatever it meets
+        assert!(a.conv(&DiscreteSF::new()).is_empty());
+        assert!(DiscreteSF::new().conv(&a).is_empty());
+
+        // Pairs landing on one position are merged, and cancel there if they sum to zero
+        let ladder = |w| {
+            DiscreteSF::from_iter([
+                Resonance {
+                    eps: 0.0,
+                    weight: 1.0,
+                },
+                Resonance {
+                    eps: 1.0,
+                    weight: w,
+                },
+            ])
+        };
+        let binomial = ladder(1.0).conv(&ladder(1.0));
+        assert_eq!(binomial.len(), 3);
+        assert_relative_eq!(binomial.find(1.0).unwrap().weight, 2.0, epsilon = 1e-14);
+
+        let cancelling = ladder(1.0).conv(&ladder(-1.0));
+        assert_eq!(cancelling.len(), 2);
+        assert!(cancelling.find(1.0).is_none());
     }
 
     #[test]
