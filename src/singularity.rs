@@ -13,8 +13,10 @@ pub struct AsymptTerm {
     exponent: f64,
     /// Power $m \in \\{0, 1\\}$ of the logarithmic factor.
     log_power: u8,
-    /// Coefficient $c$.
-    c: f64,
+    /// Coefficient $c^-$, used below $\Omega_p$.
+    c_below: f64,
+    /// Coefficient $c^+$, used at and above $\Omega_p$.
+    c_above: f64,
     /// Precomputed dispatch for $u^r$.
     pow: PowKind,
 }
@@ -22,15 +24,30 @@ pub struct AsymptTerm {
 impl AsymptTerm {
     /// $c u^r$.
     pub fn power(exponent: f64, c: f64) -> AsymptTerm {
-        AsymptTerm::make(exponent, 0, c)
+        AsymptTerm::make(exponent, 0, c, c)
     }
 
     /// $-c\ln u$, so that $c > 0$ describes a peak.
     pub fn log(c: f64) -> AsymptTerm {
-        AsymptTerm::make(0.0, 1, -c)
+        AsymptTerm::make(0.0, 1, -c, -c)
     }
 
-    fn make(exponent: f64, log_power: u8, c: f64) -> AsymptTerm {
+    /// $c^\pm u^r$, with a coefficient of its own on either side of $\Omega_p$.
+    ///
+    ///
+    /// Restricted to $r > 0$, where the term vanishes at $\Omega_p$: one that survives
+    /// there has to approach the same value from either side, $A(\omega)$ having no
+    /// jump at a singular point.
+    #[allow(dead_code)]
+    pub fn sided(exponent: f64, c_below: f64, c_above: f64) -> AsymptTerm {
+        assert!(
+            exponent > 0.0,
+            "a side-dependent term must vanish at the singular point"
+        );
+        AsymptTerm::make(exponent, 0, c_below, c_above)
+    }
+
+    fn make(exponent: f64, log_power: u8, c_below: f64, c_above: f64) -> AsymptTerm {
         assert!(exponent > -1.0, "asymptotics exponent must satisfy r > -1");
         assert!(
             log_power <= 1,
@@ -40,20 +57,22 @@ impl AsymptTerm {
             // -0.0 would sort below +0.0 in `Strength`, and the two are the same exponent
             exponent: if exponent == 0.0 { 0.0 } else { exponent },
             log_power,
-            c,
+            c_below,
+            c_above,
             pow: PowKind::of(exponent),
         }
     }
 
-    /// Value of the term at $u$.
-    fn value(&self, u: f64) -> f64 {
-        let v = self.c * self.pow.eval(u);
+    /// Value of the term at $u$, on the side of $\Omega_p$ given by `below`.
+    fn value(&self, below: bool, u: f64) -> f64 {
+        let c = if below { self.c_below } else { self.c_above };
+        let v = c * self.pow.eval(u);
         if self.log_power == 0 { v } else { v * u.ln() }
     }
 
-    /// Integral of the term over one side of $\Omega_p$ of length `l` in units of $u$,
-    /// $\int_0^l c u^r \ln^m u\\, du$.
-    fn half_integral(&self, l: f64) -> f64 {
+    /// Integral of the term with coefficient `c` over one side of $\Omega_p$ of length
+    /// `l` in units of $u$, $\int_0^l c u^r \ln^m u\\, du$.
+    fn half_integral(&self, c: f64, l: f64) -> f64 {
         // The side is empty when Ω_p sits at that end of the support
         if l == 0.0 {
             return 0.0;
@@ -61,9 +80,9 @@ impl AsymptTerm {
         let rp1 = self.exponent + 1.0;
         let lp = l.powf(rp1);
         if self.log_power == 0 {
-            self.c * lp / rp1
+            c * lp / rp1
         } else {
-            self.c * lp * (l.ln() / rp1 - 1.0 / (rp1 * rp1))
+            c * lp * (l.ln() / rp1 - 1.0 / (rp1 * rp1))
         }
     }
 
@@ -143,8 +162,9 @@ impl Singularity {
     ///
     /// Diverges at $\Omega_p$ unless every term stays bounded there.
     pub fn value(&self, omega: f64) -> f64 {
-        let u = (omega - self.position).abs() / self.scale;
-        self.terms.iter().map(|t| t.value(u)).sum()
+        let d = omega - self.position;
+        let u = d.abs() / self.scale;
+        self.terms.iter().map(|t| t.value(d < 0.0, u)).sum()
     }
 
     /// $\int_{\omega_{min}}^{\omega_{max}} S_p(\omega)d\omega$ over `support`, in closed
@@ -166,7 +186,7 @@ impl Singularity {
         // The half-integrals are taken over u, and dω = s du restores the scale
         self.terms
             .iter()
-            .map(|t| t.half_integral(below) + t.half_integral(above))
+            .map(|t| t.half_integral(t.c_below, below) + t.half_integral(t.c_above, above))
             .sum::<f64>()
             * self.scale
     }
@@ -182,9 +202,9 @@ impl Singularity {
             .filter(|t| t.exponent == 0.0)
             .map(|t| {
                 if t.log_power == 0 {
-                    t.c
+                    t.c_above
                 } else {
-                    -t.c * ln_scale
+                    -t.c_above * ln_scale
                 }
             })
             .sum()
@@ -196,9 +216,16 @@ impl Singularity {
         self.terms.iter().filter_map(|t| {
             let strength = t.strength();
             // c u^r tends to sign(c) ∞ for r < 0, while c ln u tends to -sign(c) ∞
-            strength
-                .is_divergent()
-                .then(|| (strength, if t.log_power == 0 { t.c } else { -t.c }))
+            strength.is_divergent().then(|| {
+                (
+                    strength,
+                    if t.log_power == 0 {
+                        t.c_above
+                    } else {
+                        -t.c_above
+                    },
+                )
+            })
         })
     }
 }
@@ -311,6 +338,43 @@ mod tests {
             quad,
             max_relative = 1e-6
         );
+    }
+
+    #[test]
+    fn sided() {
+        // 3u below Ω_p and 5u above it, with Ω_p at the origin and u = |ω|
+        let sing = Singularity::new(0.0, 1.0, vec![AsymptTerm::sided(1.0, 3.0, 5.0)]);
+        for omega in [-2.0f64, -0.5, 0.5, 2.0] {
+            let c = if omega < 0.0 { 3.0 } else { 5.0 };
+            assert_relative_eq!(sing.value(omega), c * omega.abs(), max_relative = 1e-14);
+        }
+
+        // Each side of the integral takes its own coefficient:
+        // ∫_{-2}^{0} 3|ω| dω + ∫_0^2 5ω dω = 6 + 10
+        assert_relative_eq!(
+            sing.integral(Segment::new(-2.0, 2.0)),
+            16.0,
+            max_relative = 1e-14
+        );
+
+        // The scale divides the distance on both sides alike
+        let scaled = Singularity::new(0.0, 2.0, vec![AsymptTerm::sided(1.0, 3.0, 5.0)]);
+        assert_relative_eq!(scaled.value(-2.0), 3.0, max_relative = 1e-14);
+        assert_relative_eq!(scaled.value(2.0), 5.0, max_relative = 1e-14);
+
+        // A term vanishing at Ω_p leaves nothing behind and diverges nowhere
+        assert_eq!(sing.finite_limit(), 0.0);
+        assert_eq!(sing.divergences().count(), 0);
+
+        // A symmetric term is the same read from either side
+        let plain = Singularity::new(0.0, 1.0, vec![AsymptTerm::power(1.0, 3.0)]);
+        assert_eq!(plain.value(-2.0), plain.value(2.0));
+    }
+
+    #[test]
+    #[should_panic(expected = "must vanish at the singular point")]
+    fn sided_surviving_at_the_point() {
+        let _ = AsymptTerm::sided(0.0, 1.0, 2.0);
     }
 
     #[test]
