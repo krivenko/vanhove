@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.0] - Unreleased
+
+### Added
+
+- `segment::Segment`, a segment of the frequency axis.
+
+### Changed
+
+- `SpectralFunction::support()` and `DiscreteSF::support()` return a `Segment` in
+  place of a pair of frequencies.
+
 ## [0.1.1] - 2026-09-10
 
 ### Added
@@ -14,5 +25,6 @@ All notable changes to this project will be documented in this file.
 
 Initial public release.
 
+[0.2.0]: https://github.com/krivenko/vanhove/compare/v0.1.1...HEAD
 [0.1.1]: https://github.com/krivenko/vanhove/releases/tag/v0.1.1
 [0.1.0]: https://github.com/krivenko/vanhove/releases/tag/v0.1.0

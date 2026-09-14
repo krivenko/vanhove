@@ -1,6 +1,7 @@
 //! Model densities of states commonly used in physics.
 
 use crate::discrete::{DiscreteSF, Resonance};
+use crate::segment::Segment;
 use crate::util::fermi;
 use crate::{ContinuousSF, SingularLaw, Singularity, SpectralFunction};
 
@@ -58,11 +59,11 @@ impl FlatDOS {
     }
 }
 impl ContinuousSF for FlatDOS {
-    fn support(&self) -> (f64, f64) {
+    fn support(&self) -> Segment {
         if self.delta == 0.0 {
-            (self.eps - self.d, self.eps + self.d)
+            Segment::new(self.eps - self.d, self.eps + self.d)
         } else {
-            (f64::NEG_INFINITY, f64::INFINITY)
+            Segment::new(f64::NEG_INFINITY, f64::INFINITY)
         }
     }
     fn regular(&self, omega: f64) -> f64 {
@@ -114,8 +115,8 @@ impl GaussianDOS {
     }
 }
 impl ContinuousSF for GaussianDOS {
-    fn support(&self) -> (f64, f64) {
-        (f64::NEG_INFINITY, f64::INFINITY)
+    fn support(&self) -> Segment {
+        Segment::new(f64::NEG_INFINITY, f64::INFINITY)
     }
     fn regular(&self, omega: f64) -> f64 {
         self.prefactor * (-(omega - self.eps).powi(2) / self.denom).exp()
@@ -168,8 +169,8 @@ impl SemicircleDOS {
     }
 }
 impl ContinuousSF for SemicircleDOS {
-    fn support(&self) -> (f64, f64) {
-        (self.edges[0].position, self.edges[1].position)
+    fn support(&self) -> Segment {
+        Segment::new(self.edges[0].position, self.edges[1].position)
     }
     fn regular(&self, omega: f64) -> f64 {
         if omega == self.edges[0].position || omega == self.edges[1].position {
@@ -215,7 +216,7 @@ struct PowerLawDOS {
     eps: f64,
     r: f64,
     /// Band edges.
-    edges: [f64; 2],
+    edges: Segment,
     singularity: [Singularity; 1],
     prefactor: f64,
 }
@@ -236,7 +237,7 @@ impl PowerLawDOS {
         PowerLawDOS {
             eps,
             r,
-            edges: [eps, eps + w],
+            edges: Segment::new(eps, eps + w),
             singularity: [Singularity {
                 position: eps,
                 law: sing_law,
@@ -249,8 +250,8 @@ impl PowerLawDOS {
     }
 }
 impl ContinuousSF for PowerLawDOS {
-    fn support(&self) -> (f64, f64) {
-        self.edges.into()
+    fn support(&self) -> Segment {
+        self.edges
     }
     fn regular(&self, omega: f64) -> f64 {
         if self.r < 1.0 { 0.0 } else { self.value(omega) }
@@ -289,7 +290,7 @@ struct PseudogapDOS {
     eps: f64,
     r: f64,
     /// Band edges.
-    edges: [f64; 2],
+    edges: Segment,
     singularity: [Singularity; 1],
     prefactor: f64,
 }
@@ -300,7 +301,7 @@ impl PseudogapDOS {
         PseudogapDOS {
             eps,
             r,
-            edges: [eps - d, eps + d],
+            edges: Segment::new(eps - d, eps + d),
             singularity: [Singularity {
                 position: eps,
                 law: SingularLaw::Finite,
@@ -313,8 +314,8 @@ impl PseudogapDOS {
     }
 }
 impl ContinuousSF for PseudogapDOS {
-    fn support(&self) -> (f64, f64) {
-        self.edges.into()
+    fn support(&self) -> Segment {
+        self.edges
     }
     fn regular(&self, omega: f64) -> f64 {
         if self.r < 1.0 { 0.0 } else { self.value(omega) }
@@ -383,8 +384,8 @@ impl ChainDOS {
     }
 }
 impl ContinuousSF for ChainDOS {
-    fn support(&self) -> (f64, f64) {
-        (self.edges[0].position, self.edges[1].position)
+    fn support(&self) -> Segment {
+        Segment::new(self.edges[0].position, self.edges[1].position)
     }
     fn regular(&self, omega: f64) -> f64 {
         if omega == self.edges[0].position || omega == self.edges[1].position {
@@ -480,8 +481,8 @@ impl BetheDOS {
     }
 }
 impl ContinuousSF for BetheDOS {
-    fn support(&self) -> (f64, f64) {
-        (self.edges[0].position, self.edges[1].position)
+    fn support(&self) -> Segment {
+        Segment::new(self.edges[0].position, self.edges[1].position)
     }
     fn regular(&self, omega: f64) -> f64 {
         if omega == self.edges[0].position || omega == self.edges[1].position {
@@ -538,7 +539,7 @@ struct SquareDOS {
     eps: f64,
     t: f64,
     /// Band edges.
-    edges: [f64; 2],
+    edges: Segment,
     /// Position of the logarithmic van Hove singularity, which sits at the band center.
     singularity: [Singularity; 1],
     prefactor: f64,
@@ -555,7 +556,7 @@ impl SquareDOS {
         SquareDOS {
             eps,
             t,
-            edges: [eps - 4.0 * t, eps + 4.0 * t],
+            edges: Segment::new(eps - 4.0 * t, eps + 4.0 * t),
             singularity: [Singularity {
                 position: eps,
                 law: SingularLaw::Log {
@@ -568,8 +569,8 @@ impl SquareDOS {
     }
 }
 impl ContinuousSF for SquareDOS {
-    fn support(&self) -> (f64, f64) {
-        self.edges.into()
+    fn support(&self) -> Segment {
+        self.edges
     }
     fn regular(&self, omega: f64) -> f64 {
         let ax = ((omega - self.eps) / (4.0 * self.t)).abs();
@@ -622,7 +623,7 @@ struct TriangularDOS {
     eps: f64,
     t: f64,
     /// Band edges.
-    edges: [f64; 2],
+    edges: Segment,
     /// Position of the logarithmic van Hove singularity.
     singularity: [Singularity; 1],
     prefactor: f64,
@@ -641,7 +642,7 @@ impl TriangularDOS {
         TriangularDOS {
             eps,
             t,
-            edges: [omega_min, omega_max],
+            edges: Segment::new(omega_min, omega_max),
             singularity: [Singularity {
                 position: eps + 2.0 * t,
                 law: SingularLaw::Log {
@@ -654,8 +655,8 @@ impl TriangularDOS {
     }
 }
 impl ContinuousSF for TriangularDOS {
-    fn support(&self) -> (f64, f64) {
-        self.edges.into()
+    fn support(&self) -> Segment {
+        self.edges
     }
     fn regular(&self, omega: f64) -> f64 {
         let ax = ((omega - self.singularity[0].position) / (8.0 * self.t)).abs();
@@ -739,7 +740,7 @@ struct HoneycombDOS {
     eps: f64,
     t: f64,
     /// Band edges.
-    edges: [f64; 2],
+    edges: Segment,
     /// Positions of the logarithmic van Hove singularities.
     singularities: [Singularity; 2],
     prefactor: f64,
@@ -756,7 +757,7 @@ impl HoneycombDOS {
         HoneycombDOS {
             eps,
             t,
-            edges: [eps - 3.0 * t, eps + 3.0 * t],
+            edges: Segment::new(eps - 3.0 * t, eps + 3.0 * t),
             singularities: [
                 Singularity {
                     position: eps - t,
@@ -778,8 +779,8 @@ impl HoneycombDOS {
     }
 }
 impl ContinuousSF for HoneycombDOS {
-    fn support(&self) -> (f64, f64) {
-        self.edges.into()
+    fn support(&self) -> Segment {
+        self.edges
     }
     fn regular(&self, omega: f64) -> f64 {
         let ax = ((omega - self.eps) / self.t).abs();
@@ -902,7 +903,7 @@ struct LiebDOS {
     eps: f64,
     t: f64,
     /// Band edges.
-    edges: [f64; 2],
+    edges: Segment,
     /// Positions of the logarithmic van Hove singularities.
     singularities: [Singularity; 2],
     prefactor: f64,
@@ -920,7 +921,7 @@ impl LiebDOS {
         LiebDOS {
             eps,
             t,
-            edges: [eps - half_width, eps + half_width],
+            edges: Segment::new(eps - half_width, eps + half_width),
             singularities: [
                 Singularity {
                     position: eps - 2.0 * t,
@@ -942,8 +943,8 @@ impl LiebDOS {
     }
 }
 impl ContinuousSF for LiebDOS {
-    fn support(&self) -> (f64, f64) {
-        self.edges.into()
+    fn support(&self) -> Segment {
+        self.edges
     }
     fn regular(&self, omega: f64) -> f64 {
         let ax = ((omega - self.eps) / (2.0 * self.t)).abs();
@@ -1005,6 +1006,7 @@ pub fn lieb(eps: f64, t: f64) -> SpectralFunction {
 
 #[cfg(test)]
 mod tests {
+    use crate::segment::Segment;
     use crate::{SpectralFunction, models};
     use approx::assert_relative_eq;
 
@@ -1088,7 +1090,7 @@ mod tests {
         );
 
         let dos = models::flat(eps, d, 0.0);
-        assert_eq!(dos.support(), Some((eps - d, eps + d)));
+        assert_eq!(dos.support(), Some(Segment::new(eps - d, eps + d)));
         for (order, moment_ref) in moments_ref.iter().enumerate() {
             let moment = compute_moment(&dos, order as i32);
             assert_relative_eq!(moment, moment_ref, max_relative = 1e-10);
@@ -1137,7 +1139,7 @@ mod tests {
         // the singular part, and r >= 1 into the regular one
         for r in [-0.5f64, 0.0, 0.5, 1.0, 2.5] {
             let dos = models::powerlaw(eps, r, w);
-            assert_eq!(dos.support(), Some((eps, eps + w)));
+            assert_eq!(dos.support(), Some(Segment::new(eps, eps + w)));
 
             // A(ω) = (r+1)(ω-ε)^r / w^{r+1}
             let a = |omega: f64| (r + 1.0) * (omega - eps).powf(r) / w.powf(r + 1.0);
@@ -1170,7 +1172,7 @@ mod tests {
         // r < 1 puts the whole of A(ω) into the singular part, r >= 1 into the regular one
         for r in [0.5f64, 1.0, 2.5] {
             let dos = models::pseudogap(eps, r, d);
-            assert_eq!(dos.support(), Some((eps - d, eps + d)));
+            assert_eq!(dos.support(), Some(Segment::new(eps - d, eps + d)));
 
             // A(ω) = (1+r)|ω-ε|^r / (2d^{1+r})
             let a = |omega: f64| (1.0 + r) * (omega - eps).abs().powf(r) / (2.0 * d.powf(1.0 + r));
@@ -1226,7 +1228,7 @@ mod tests {
             let dos = models::bethe(z, eps, t);
             assert_eq!(
                 dos.support(),
-                Some((
+                Some(Segment::new(
                     eps - 2.0 * (zf - 1.0).sqrt() * t,
                     eps + 2.0 * (zf - 1.0).sqrt() * t
                 ))
@@ -1338,7 +1340,10 @@ mod tests {
             let dos = models::triangular(eps, t);
             assert_eq!(
                 dos.support(),
-                Some((eps + (-6.0 * t).min(3.0 * t), eps + (-6.0 * t).max(3.0 * t)))
+                Some(Segment::new(
+                    eps + (-6.0 * t).min(3.0 * t),
+                    eps + (-6.0 * t).max(3.0 * t)
+                ))
             );
             for (order, moment_ref) in moments_ref.iter().enumerate() {
                 let moment = compute_moment(&dos, order as i32);
@@ -1390,7 +1395,10 @@ mod tests {
         );
 
         let dos = models::honeycomb(eps, t);
-        assert_eq!(dos.support(), Some((eps - 3.0 * t, eps + 3.0 * t)));
+        assert_eq!(
+            dos.support(),
+            Some(Segment::new(eps - 3.0 * t, eps + 3.0 * t))
+        );
 
         // Both van Hove singularities diverge, while the Dirac point between them is a
         // zero of A(ω) that only the two logarithms cancelling leaves behind.
@@ -1470,7 +1478,7 @@ mod tests {
             let dos = models::kagome(eps, t);
             let omega_min = eps + (-2.0 * t).min(4.0 * t);
             let omega_max = eps + (-2.0 * t).max(4.0 * t);
-            assert_eq!(dos.support(), Some((omega_min, omega_max)));
+            assert_eq!(dos.support(), Some(Segment::new(omega_min, omega_max)));
             assert_relative_eq!(dos.total_weight(), 1.0, max_relative = 1e-14);
 
             // The flat band is a δ-function of weight 1/3 at the edge it touches at k = 0
@@ -1512,7 +1520,10 @@ mod tests {
 
         let dos = models::lieb(eps, t);
         let half_width = 2.0 * SQRT_2 * t;
-        assert_eq!(dos.support(), Some((eps - half_width, eps + half_width)));
+        assert_eq!(
+            dos.support(),
+            Some(Segment::new(eps - half_width, eps + half_width))
+        );
         assert_relative_eq!(dos.total_weight(), 1.0, max_relative = 1e-14);
 
         // The flat band is a δ-function of weight 1/3 at the band center

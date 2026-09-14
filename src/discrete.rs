@@ -2,6 +2,7 @@
 
 use std::ops::{Add, Mul, Neg, Sub};
 
+use crate::segment::Segment;
 use crate::util;
 
 /// Single discrete resonance $w \delta(\omega - \varepsilon)$.
@@ -224,8 +225,11 @@ impl DiscreteSF {
     ///
     /// It is the segment between the positions of the lowest and the highest resonances.
     /// Returns [`None`] for an empty spectral function.
-    pub fn support(&self) -> Option<(f64, f64)> {
-        Some((self.resonances.first()?.eps, self.resonances.last()?.eps))
+    pub fn support(&self) -> Option<Segment> {
+        Some(Segment::new(
+            self.resonances.first()?.eps,
+            self.resonances.last()?.eps,
+        ))
     }
 
     /// Total spectral weight.
@@ -263,7 +267,7 @@ mod tests {
         assert_eq!(sf.resonances()[0].eps, 2.0);
         assert_eq!(sf.resonances()[0].weight, 1.0);
         assert_eq!(sf.total_weight(), 1.0);
-        assert_eq!(sf.support(), Some((2.0, 2.0)));
+        assert_eq!(sf.support(), Some(Segment::new(2.0, 2.0)));
 
         // A resonance of zero weight is not a resonance
         assert!(DiscreteSF::one_resonance(2.0, 0.0).is_empty());
@@ -271,13 +275,13 @@ mod tests {
         let sf = sf + DiscreteSF::one_resonance(-1.5, 0.25);
         assert_eq!(sf.len(), 2);
         assert_eq!(sf.total_weight(), 1.25);
-        assert_eq!(sf.support(), Some((-1.5, 2.0)));
+        assert_eq!(sf.support(), Some(Segment::new(-1.5, 2.0)));
 
         // Exactly cancelling contributions annihilate the resonance
         let sf = sf + DiscreteSF::one_resonance(2.0, -1.0);
         assert_eq!(sf.len(), 1);
         assert_eq!(sf.total_weight(), 0.25);
-        assert_eq!(sf.support(), Some((-1.5, -1.5)));
+        assert_eq!(sf.support(), Some(Segment::new(-1.5, -1.5)));
     }
 
     #[test]
@@ -298,7 +302,7 @@ mod tests {
         // 20 distinct levels, each hit 5 times
         assert_eq!(bulk.len(), 20);
         assert_relative_eq!(bulk.total_weight(), 1.0, epsilon = 1e-15);
-        assert_eq!(bulk.support(), Some((-10.0, 9.0)));
+        assert_eq!(bulk.support(), Some(Segment::new(-10.0, 9.0)));
         for (r1, r2) in bulk.iter().zip(&one_by_one) {
             assert_eq!(r1.eps, r2.eps);
             assert_relative_eq!(r1.weight, r2.weight, epsilon = 1e-15);

@@ -15,6 +15,7 @@ use bilby::QuadratureError;
 use num_complex::Complex64;
 
 use crate::discrete::DiscreteSF;
+use crate::segment::Segment;
 
 //
 // ContinuousSF
@@ -52,9 +53,8 @@ struct Singularity {
 /// The singular terms are keyed by their index p, which runs over the valid
 /// indices of the slice returned by `singularities()`.
 trait ContinuousSF: Send + Sync {
-    /// Support of the spectral function specified as a segment
-    /// $[\omega_{min}, \omega_{max}]$.
-    fn support(&self) -> (f64, f64);
+    /// Support of the spectral function.
+    fn support(&self) -> Segment;
     /// Regular part, $R(\omega)$.
     fn regular(&self, omega: f64) -> f64;
     /// Singular points $\Omega_p$ along with the leading behaviour of $S_p$ at each.
@@ -188,12 +188,13 @@ impl SpectralFunction {
     /// of all contributions. The segment is not necessarily tight: the spectral function
     /// may vanish within the gaps between disjoint contributions. Returns [`None`] for an
     /// empty spectral function.
-    pub fn support(&self) -> Option<(f64, f64)> {
-        self.continuous
-            .iter()
-            .map(|(cd, _)| cd.support())
-            .chain(self.discrete.support())
-            .reduce(|hull, sup| (hull.0.min(sup.0), hull.1.max(sup.1)))
+    pub fn support(&self) -> Option<Segment> {
+        Segment::hull(
+            self.continuous
+                .iter()
+                .map(|(cd, _)| cd.support())
+                .chain(self.discrete.support()),
+        )
     }
 
     /// Total spectral weight.
@@ -217,9 +218,8 @@ impl SpectralFunction {
         let mut finite = 0.0f64;
 
         for (csf, w) in &self.continuous {
-            let (omega_min, omega_max) = csf.support();
             // R(ω) is not defined outside of the support
-            if omega < omega_min || omega > omega_max {
+            if !csf.support().contains(omega) {
                 continue;
             }
 
@@ -291,13 +291,13 @@ impl SpectralFunction {
         let tol = tol.unwrap_or(1e-10);
         for (csf, w) in &self.continuous {
             let mut res_contrib = 0.0f64;
-            let (omega_min, omega_max) = csf.support();
+            let support = csf.support();
 
             // Integrate the regular part, ∫R(ω)f(ω)dω
             res_contrib += util::bilby_integrate(
                 |omega| csf.regular(omega) * f(omega),
-                omega_min,
-                omega_max,
+                support.min(),
+                support.max(),
                 tol,
             )?
             .value;
@@ -315,8 +315,8 @@ impl SpectralFunction {
                             csf.asymptotics(p, omega) * (f(omega) - f_p)
                         }
                     },
-                    omega_min,
-                    omega_max,
+                    support.min(),
+                    support.max(),
                     tol,
                 )?
                 .value;
@@ -374,6 +374,7 @@ impl SpectralFunction {
 mod tests {
     use crate::SpectralFunction;
     use crate::models::{chain, discrete, gaussian, semicircle, square};
+    use crate::segment::Segment;
     use approx::assert_relative_eq;
     use std::f64::consts::PI;
 
@@ -413,21 +414,24 @@ mod tests {
         // Discrete contributions alone: positions of the outermost resonances
         assert_eq!(
             discrete(&[-0.7, 1.2, 0.3], &[0.25, 0.6, 0.15]).support(),
-            Some((-0.7, 1.2))
+            Some(Segment::new(-0.7, 1.2))
         );
 
         // A single continuous contribution: its band edges
-        assert_eq!(chain(0.5, 1.0).support(), Some((-1.5, 2.5)));
+        assert_eq!(chain(0.5, 1.0).support(), Some(Segment::new(-1.5, 2.5)));
 
         // Mixed contributions: the hull of all supports. Neither the resonance at 0.0
         // nor the narrower square lattice band widens the chain band, the resonance
         // at 5.0 does.
         let dos = discrete(&[0.0, 5.0], &[0.3, 0.3]) + chain(0.5, 1.0) + square(0.0, 0.25);
-        assert_eq!(dos.support(), Some((-1.5, 5.0)));
+        assert_eq!(dos.support(), Some(Segment::new(-1.5, 5.0)));
 
         // An unbounded contribution makes the whole support unbounded
         let dos = discrete(&[-0.7], &[0.5]) + gaussian(1.4, 0.5);
-        assert_eq!(dos.support(), Some((f64::NEG_INFINITY, f64::INFINITY)));
+        assert_eq!(
+            dos.support(),
+            Some(Segment::new(f64::NEG_INFINITY, f64::INFINITY))
+        );
     }
 
     #[test]
