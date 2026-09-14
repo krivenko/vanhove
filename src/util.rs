@@ -9,7 +9,6 @@ use bilby::{
 ///
 /// `powf()` costs an order of magnitude more than `sqrt()`, which is worth avoiding
 /// when the same exponent is reused, as in a quadrature integrand.
-#[allow(dead_code)]
 #[derive(Debug, Clone, Copy)]
 pub enum PowKind {
     /// $u^0 = 1$.
@@ -26,7 +25,6 @@ pub enum PowKind {
     Powf(f64),
 }
 
-#[allow(dead_code)]
 impl PowKind {
     /// Largest integer exponent still handled by `powi()`.
     const MAX_INT_EXPONENT: f64 = 32.0;
