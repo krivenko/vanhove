@@ -72,24 +72,24 @@ impl Panel {
 /// its own expansion: $R(\omega)$ is smooth within a panel but need not be so across
 /// a singular point.
 #[derive(Debug, Clone)]
-pub struct Interpolated {
+pub struct InterpolatedSF {
     support: Segment,
     /// Panels in ascending order of frequency.
     panels: Box<[Panel]>,
     singularities: Box<[Singularity]>,
 }
 
-impl Interpolated {
+impl InterpolatedSF {
     /// Default relative tolerance of the fit.
     const DEFAULT_TOL: f64 = 1e-12;
 
     /// Interpolate the regular part of `csf`.
     ///
     /// `tol` is a tolerance on the Chebyshev coefficients relative to the largest of
-    /// them, and defaults to $10^{-12}$. Consult [`Interpolated::fit_error()`] for what
+    /// them, and defaults to $10^{-12}$. Consult [`InterpolatedSF::fit_error()`] for what
     /// the fit actually achieved: a regular part that is not smooth at an end of a
     /// panel converges too slowly to reach any tolerance worth asking for.
-    pub fn new(csf: &dyn ContinuousSF, tol: Option<f64>) -> Interpolated {
+    pub fn new(csf: &dyn ContinuousSF, tol: Option<f64>) -> InterpolatedSF {
         let support = csf.support();
         assert!(
             support.is_bounded(),
@@ -115,7 +115,7 @@ impl Interpolated {
         breaks.sort_unstable_by(f64::total_cmp);
         breaks.dedup();
 
-        Interpolated {
+        InterpolatedSF {
             support,
             panels: breaks
                 .windows(2)
@@ -136,7 +136,7 @@ impl Interpolated {
     }
 }
 
-impl ContinuousSF for Interpolated {
+impl ContinuousSF for InterpolatedSF {
     fn support(&self) -> Segment {
         self.support
     }
@@ -154,7 +154,7 @@ impl ContinuousSF for Interpolated {
         &self.singularities
     }
     fn shifted(&self, by: f64) -> Box<dyn ContinuousSF> {
-        Box::new(Interpolated {
+        Box::new(InterpolatedSF {
             support: self.support.shifted(by),
             panels: self
                 .panels
@@ -171,7 +171,7 @@ impl ContinuousSF for Interpolated {
 
 #[cfg(test)]
 mod tests {
-    use super::{Interpolated, Panel};
+    use super::{InterpolatedSF, Panel};
     use crate::ContinuousSF;
     use crate::segment::Segment;
     use crate::singularity::{AsymptTerm, Singularity};
@@ -216,7 +216,7 @@ mod tests {
     }
 
     /// Largest departure of the interpolation from `f` over the support.
-    fn worst_error<F: Fn(f64) -> f64>(interp: &Interpolated, f: F) -> f64 {
+    fn worst_error<F: Fn(f64) -> f64>(interp: &InterpolatedSF, f: F) -> f64 {
         let support = interp.support();
         (1..500).fold(0.0f64, |w, i| {
             let omega = support.min() + support.length() * (i as f64) / 500.0;
@@ -228,7 +228,7 @@ mod tests {
     fn smooth_fit() {
         // A function analytic on the panel is caught to machine precision
         let f = |omega: f64| (-(omega - 0.5).powi(2)).exp();
-        let interp = Interpolated::new(&model(-2.0, 3.0, f), None);
+        let interp = InterpolatedSF::new(&model(-2.0, 3.0, f), None);
         assert_eq!(interp.support(), Segment::new(-2.0, 3.0));
         assert!(interp.singularities().is_empty());
         assert!(interp.fit_error() <= 1e-12);
@@ -246,7 +246,7 @@ mod tests {
     fn panels_split_at_singular_points() {
         let log = |position| Singularity::new(position, 1.0, vec![AsymptTerm::log(1.0)]);
         // An interior singular point splits the support in two
-        let interp = Interpolated::new(&with_sing(-1.0, 2.0, vec![log(0.0)], f64::abs), None);
+        let interp = InterpolatedSF::new(&with_sing(-1.0, 2.0, vec![log(0.0)], f64::abs), None);
         assert_eq!(interp.panels.len(), 2);
 
         // |ω| is a kink each panel resolves exactly, being linear on either side
@@ -254,12 +254,12 @@ mod tests {
 
         // A singular point sitting at an end of the support adds no panel
         let edge = Singularity::new(-1.0, 1.0, vec![AsymptTerm::power(0.5, 1.0)]);
-        let interp = Interpolated::new(&with_sing(-1.0, 2.0, vec![edge], |o: f64| o), None);
+        let interp = InterpolatedSF::new(&with_sing(-1.0, 2.0, vec![edge], |o: f64| o), None);
         assert_eq!(interp.panels.len(), 1);
 
         // Two singularities at one point are one break, not two
         let sings = vec![log(0.5), log(0.5)];
-        let interp = Interpolated::new(&with_sing(-1.0, 2.0, sings, f64::abs), None);
+        let interp = InterpolatedSF::new(&with_sing(-1.0, 2.0, sings, f64::abs), None);
         assert_eq!(interp.panels.len(), 2);
     }
 
@@ -268,7 +268,7 @@ mod tests {
         // The singular part passes through untouched, only R(ω) being approximated
         let sing = Singularity::new(0.5, 2.0, vec![AsymptTerm::power(-0.5, 3.0)]);
         let m = with_sing(-1.0, 2.0, vec![sing.clone()], |omega: f64| omega);
-        let interp = Interpolated::new(&m, None);
+        let interp = InterpolatedSF::new(&m, None);
         assert_eq!(interp.singularities().len(), 1);
         for omega in [-1.0, 0.0, 1.0, 2.0] {
             assert_eq!(interp.singularities()[0].value(omega), sing.value(omega));
@@ -287,13 +287,13 @@ mod tests {
             }
         };
 
-        let whole = Interpolated::new(&model(-2.0, 2.0, f), None);
+        let whole = InterpolatedSF::new(&model(-2.0, 2.0, f), None);
         assert!(whole.fit_error() > 1e-13);
         assert!(whole.panels[0].coeffs.len() >= Panel::MAX_ORDER - 1);
 
         // A singularity with no terms subtracts nothing and only marks the point
         let kink = Singularity::new(0.0, 1.0, vec![]);
-        let split = Interpolated::new(&with_sing(-2.0, 2.0, vec![kink], f), None);
+        let split = InterpolatedSF::new(&with_sing(-2.0, 2.0, vec![kink], f), None);
         assert_eq!(split.panels.len(), 2);
         assert!(split.fit_error() <= 1e-12);
         assert!(worst_error(&split, f) < 1e-11);
@@ -306,6 +306,6 @@ mod tests {
     #[test]
     #[should_panic(expected = "must have a bounded support")]
     fn unbounded_support() {
-        let _ = Interpolated::new(&model(f64::NEG_INFINITY, 1.0, |omega: f64| omega), None);
+        let _ = InterpolatedSF::new(&model(f64::NEG_INFINITY, 1.0, |omega: f64| omega), None);
     }
 }
