@@ -110,4 +110,21 @@ mod tests {
             epsilon = 1e-12
         );
     }
+
+    #[test]
+    fn fermi() {
+        assert_eq!(util::fermi(0.0), 0.5);
+        assert_abs_diff_eq!(
+            util::fermi(-1.0),
+            std::f64::consts::E / (1.0 + std::f64::consts::E),
+            epsilon = 1e-14
+        );
+        assert_abs_diff_eq!(
+            util::fermi(1.0),
+            1.0 / (1.0 + std::f64::consts::E),
+            epsilon = 1e-14
+        );
+        assert_eq!(util::fermi(f64::INFINITY), 0.0);
+        assert_eq!(util::fermi(f64::NEG_INFINITY), 1.0);
+    }
 }
