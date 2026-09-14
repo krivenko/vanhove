@@ -58,6 +58,15 @@ impl Segment {
         0.5 * self.min + 0.5 * self.max
     }
 
+    /// Image of the segment under the reflection $\nu \mapsto \omega - \nu$, which is
+    /// the one a convolution integral runs over.
+    pub fn mirrored(&self, omega: f64) -> Segment {
+        Segment {
+            min: omega - self.max,
+            max: omega - self.min,
+        }
+    }
+
     /// The same segment displaced in frequency by `by`.
     pub fn shifted(&self, by: f64) -> Segment {
         Segment {
@@ -209,6 +218,20 @@ mod tests {
         // segment of finite frequencies
         let huge = Segment::new(-f64::MAX, f64::MAX);
         assert_eq!(huge.midpoint(), 0.0);
+    }
+
+    #[test]
+    fn mirrored() {
+        let segment = Segment::new(-1.5, 2.0);
+        assert_eq!(segment.mirrored(0.0), Segment::new(-2.0, 1.5));
+        assert_eq!(segment.mirrored(1.0), Segment::new(-1.0, 2.5));
+
+        // The reflection is its own inverse, and turns the segment around without
+        // stretching it
+        assert_eq!(segment.mirrored(0.5).mirrored(0.5), segment);
+        let mirrored = segment.mirrored(3.0);
+        assert_eq!(mirrored.length(), segment.length());
+        assert_eq!(mirrored.midpoint(), 3.0 - segment.midpoint());
     }
 
     #[test]
