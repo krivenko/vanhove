@@ -832,8 +832,9 @@ struct LiebDOS {
     t: f64,
     /// Band edges.
     edges: Segment,
-    /// Positions of the logarithmic van Hove singularities.
-    singularities: [Singularity; 2],
+    /// The point where the dispersive bands touch, between the two logarithmic van
+    /// Hove singularities.
+    singularities: [Singularity; 3],
     prefactor: f64,
 }
 impl LiebDOS {
@@ -847,12 +848,16 @@ impl LiebDOS {
         let prefactor = 1.0 / (PI.powi(2) * t);
         let half_width = 2.0 * SQRT_2 * t;
         let log_terms = || vec![AsymptTerm::log(prefactor)];
+        // The two dispersive bands touch at ε with a linear dispersion, so that A(ω)
+        // rises out of that point as |ω-ε|/(4\pi t^2)
+        let touching = prefactor * PI / 2.0;
         LiebDOS {
             eps,
             t,
             edges: Segment::new(eps - half_width, eps + half_width),
             singularities: [
                 Singularity::new(eps - 2.0 * t, 2.0 * t, log_terms()),
+                Singularity::new(eps, 2.0 * t, vec![AsymptTerm::power(1.0, touching)]),
                 Singularity::new(eps + 2.0 * t, 2.0 * t, log_terms()),
             ],
             prefactor,
@@ -868,7 +873,7 @@ impl ContinuousSF for LiebDOS {
         // Square lattice energy variable, which vanishes at the singular points. The
         // factored form is free of cancellation for ax ≈ 1.
         let y = (ax - 1.0) * (ax + 1.0);
-        if y == 0.0 {
+        let logs_subtracted = if y == 0.0 {
             2.0 * self.prefactor * std::f64::consts::LN_2
         } else if y.abs() < Self::SERIES_THRESHOLD {
             // 1 - y^2 rounds to unity for small y, making elliptic_k() overflow. Expand it
@@ -881,7 +886,9 @@ impl ContinuousSF for LiebDOS {
                     + 0.25 * ax * y.powi(2) * (l - 1.0))
         } else {
             self.prefactor * (ax * (1.0 - y.powi(2)).elliptic_k() + y.abs().ln())
-        }
+        };
+        // The kink the bands leave where they touch goes the same way
+        logs_subtracted - self.singularities[1].value(omega)
     }
     fn singularities(&self) -> &[Singularity] {
         &self.singularities
@@ -1029,10 +1036,10 @@ mod tests {
             &HoneycombDOS::new(eps, t),
             &[log_weight, 3.0 * 3.0f64.sqrt() / PI, log_weight],
         );
-        check_asympt_int(
-            &LiebDOS::new(eps, t),
-            &[4.0 * (SQRT_2 - (1.0 + SQRT_2).ln()) / PI.powi(2); 2],
-        );
+        // The bands touch at ε between the two logarithms and carry 2/\pi of the
+        // weight there, whatever the hopping constant
+        let log_weight = 4.0 * (SQRT_2 - (1.0 + SQRT_2).ln()) / PI.powi(2);
+        check_asympt_int(&LiebDOS::new(eps, t), &[log_weight, 2.0 / PI, log_weight]);
 
         // For r < 1 the singular part carries the whole unit weight of A(ω), while for
         // r >= 1 there is no singularity left to integrate
@@ -1568,6 +1575,52 @@ mod tests {
     }
 
     #[test]
+    fn lieb_band_touching() {
+        use std::f64::consts::PI;
+
+        let eps = 0.5f64;
+        for t in [1.0f64, 2.5] {
+            let dos = LiebDOS::new(eps, t);
+
+            // The touching point lies between the two logarithmic van Hove singularities
+            assert_eq!(dos.singularities().len(), 3);
+            assert_eq!(dos.singularities()[1].position, eps);
+
+            // The two dispersive bands meet there with a linear dispersion, so that
+            // A(ω) rises out of the touching point as |ω-ε|/(4\pi t^2)
+            let coefficient = 1.0 / (4.0 * PI * t * t);
+            // Powers of two, so that (ε+h) - ε is exact and the probe measures the
+            // coefficient rather than its own cancellation
+            for h in [10, 20, 30].map(|e| 2f64.powi(-e)) {
+                assert_relative_eq!(
+                    dos.singularities()[1].value(eps + h) / h,
+                    coefficient,
+                    max_relative = 1e-12
+                );
+                // And that really is how A(ω) behaves there
+                let a = dos.regular(eps + h)
+                    + dos
+                        .singularities()
+                        .iter()
+                        .map(|s| s.value(eps + h))
+                        .sum::<f64>();
+                assert_relative_eq!(a / h, coefficient, max_relative = 1e-6);
+            }
+
+            // Subtracting it leaves R(ω) with no kink to speak of: the slope it used to
+            // carry away from ε is down to a fraction of a percent of the coefficient
+            let r0 = dos.regular(eps);
+            for h in [1e-2f64, 1e-3] {
+                let slope = (dos.regular(eps + h) - r0) / h;
+                assert!(
+                    slope.abs() < 0.01 * coefficient,
+                    "R still kinks where the bands touch: {slope:.3e}"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn lieb_regular_near_singularity() {
         let (eps, t) = (0.5f64, 2.0f64);
         let dos = LiebDOS::new(eps, t);
@@ -1575,10 +1628,13 @@ mod tests {
 
         // At the singular points the subtracted logarithm cancels the divergence of
         // K(1-y^2) up to ln(4)
+        // The band touching term is subtracted along with the logarithms, and comes to
+        // prefactor \pi/2 at the singular points, where |ω-ε| is 2t
+        let touching = std::f64::consts::PI / 2.0;
         for omega_p in [eps - 2.0 * t, eps + 2.0 * t] {
             assert_relative_eq!(
                 dos.regular(omega_p),
-                2.0 * prefactor * std::f64::consts::LN_2,
+                prefactor * (2.0 * std::f64::consts::LN_2 - touching),
                 max_relative = 1e-14
             );
         }
@@ -1604,7 +1660,7 @@ mod tests {
                     let omega = eps + band * (1.0 + delta) * 2.0 * t;
                     assert_relative_eq!(
                         dos.regular(omega),
-                        prefactor * ref_value,
+                        prefactor * (ref_value - touching * (1.0 + delta)),
                         max_relative = 1e-8
                     );
                 }
