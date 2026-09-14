@@ -682,8 +682,8 @@ struct HoneycombDOS {
     t: f64,
     /// Band edges.
     edges: Segment,
-    /// Positions of the logarithmic van Hove singularities.
-    singularities: [Singularity; 2],
+    /// The Dirac point, between the two logarithmic van Hove singularities.
+    singularities: [Singularity; 3],
     prefactor: f64,
 }
 impl HoneycombDOS {
@@ -696,12 +696,16 @@ impl HoneycombDOS {
         assert!(t > 0.0, "hopping constant must be positive");
         let prefactor = 1.0 / (PI.powi(2) * t);
         let log_terms = || vec![AsymptTerm::log(prefactor * 0.75)];
+        // The two bands meet at the Dirac point with a linear dispersion, so that
+        // A(ω) rises out of it as |ω-ε|/(\sqrt{3}\pi t^2)
+        let dirac = prefactor * PI / 3.0f64.sqrt();
         HoneycombDOS {
             eps,
             t,
             edges: Segment::new(eps - 3.0 * t, eps + 3.0 * t),
             singularities: [
                 Singularity::new(eps - t, 4.0 * t, log_terms()),
+                Singularity::new(eps, t, vec![AsymptTerm::power(1.0, dirac)]),
                 Singularity::new(eps + t, 4.0 * t, log_terms()),
             ],
             prefactor,
@@ -719,7 +723,7 @@ impl ContinuousSF for HoneycombDOS {
         let d = (1.0 - ax) * (1.0 + ax);
         // Argument of the logarithm subtracted by the triangular lattice DOS
         let y = 0.125 * d.abs();
-        if y == 0.0 {
+        let logs_subtracted = if y == 0.0 {
             -self.prefactor * 0.75 * std::f64::consts::LN_2
         } else if y < Self::SERIES_THRESHOLD {
             // Close to a singularity, K(z_1/z_0)/\sqrt{z_0} ≈ -0.75 ln(y) nearly cancels the
@@ -740,7 +744,9 @@ impl ContinuousSF for HoneycombDOS {
             let b = 4.0 * ax;
             let (z0, z1) = if ax <= 1.0 { (a, b) } else { (b, a) };
             self.prefactor * (ax * ((z1 / z0).elliptic_k() / z0.sqrt()) + 0.75 * (0.5 * y).ln())
-        }
+        };
+        // The kink the linear band leaves at the Dirac point goes the same way
+        logs_subtracted - self.singularities[1].value(omega)
     }
     fn singularities(&self) -> &[Singularity] {
         &self.singularities
@@ -1016,9 +1022,12 @@ mod tests {
                 &[9.0 / (4.0 * PI.powi(2)) * (3.0 + LN_2)],
             );
         }
+        // The Dirac point sits between the two logarithms and carries 3\sqrt{3}/\pi of
+        // the weight, whatever the hopping constant
+        let log_weight = (9.0 + 3.0 * LN_2) / (2.0 * PI.powi(2));
         check_asympt_int(
             &HoneycombDOS::new(eps, t),
-            &[(9.0 + 3.0 * LN_2) / (2.0 * PI.powi(2)); 2],
+            &[log_weight, 3.0 * 3.0f64.sqrt() / PI, log_weight],
         );
         check_asympt_int(
             &LiebDOS::new(eps, t),
@@ -1368,6 +1377,51 @@ mod tests {
     }
 
     #[test]
+    fn honeycomb_dirac_point() {
+        use std::f64::consts::PI;
+
+        let eps = 0.5f64;
+        for t in [1.0f64, 2.5] {
+            let dos = HoneycombDOS::new(eps, t);
+
+            // The Dirac point lies between the two logarithmic van Hove singularities
+            assert_eq!(dos.singularities().len(), 3);
+            assert_eq!(dos.singularities()[1].position, eps);
+
+            // The two bands meet there with a linear dispersion, so that A(ω) rises out
+            // of the Dirac point as |ω-ε|/(\sqrt{3}\pi t^2)
+            let coefficient = 1.0 / (3.0f64.sqrt() * PI * t * t);
+            let band = models::honeycomb(eps, t);
+            // Powers of two, so that (ε+h) - ε is exact and the probe measures the
+            // coefficient rather than its own cancellation
+            for h in [10, 20, 30].map(|e| 2f64.powi(-e)) {
+                assert_relative_eq!(
+                    dos.singularities()[1].value(eps + h) / h,
+                    coefficient,
+                    max_relative = 1e-12
+                );
+                // And that really is how A(ω) behaves there
+                assert_relative_eq!(
+                    band.continuous_at(eps + h) / h,
+                    coefficient,
+                    max_relative = 1e-6
+                );
+            }
+
+            // Subtracting it leaves R(ω) with no kink to speak of: the slope it used to
+            // carry away from ε is down to a fraction of a percent of the coefficient
+            let r0 = dos.regular(eps);
+            for h in [1e-2f64, 1e-3] {
+                let slope = (dos.regular(eps + h) - r0) / h;
+                assert!(
+                    slope.abs() < 0.01 * coefficient,
+                    "R still kinks at the Dirac point: {slope:.3e}"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn honeycomb_regular_near_singularity() {
         let (eps, t) = (0.5f64, 2.0f64);
         let dos = HoneycombDOS::new(eps, t);
@@ -1375,10 +1429,13 @@ mod tests {
 
         // Unlike its triangular lattice counterpart, R(ω) does not vanish at the singular
         // points: the two logarithms subtracted there differ in scale by a factor of 2.
+        // The Dirac term is subtracted along with the logarithms, and comes to
+        // prefactor \pi/\sqrt{3} at the singular points, where |ω-ε| is t
+        let dirac = std::f64::consts::PI / 3.0f64.sqrt();
         for omega_p in [eps - t, eps + t] {
             assert_relative_eq!(
                 dos.regular(omega_p),
-                -prefactor * 0.75 * std::f64::consts::LN_2,
+                -prefactor * (0.75 * std::f64::consts::LN_2 + dirac),
                 max_relative = 1e-14
             );
         }
@@ -1401,7 +1458,7 @@ mod tests {
                     let omega = eps + band * (1.0 + delta) * t;
                     assert_relative_eq!(
                         dos.regular(omega),
-                        prefactor * ref_value,
+                        prefactor * (ref_value - dirac * (1.0 + delta)),
                         max_relative = 1e-8
                     );
                 }
