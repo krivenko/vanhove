@@ -181,8 +181,8 @@ impl Singularity {
             support.contains(self.position),
             "Ω_p lies outside the support"
         );
-        let below = (self.position - support.min()) / self.scale;
-        let above = (support.max() - self.position) / self.scale;
+        let (lower, upper) = support.split_at(self.position);
+        let (below, above) = (lower.length() / self.scale, upper.length() / self.scale);
         // The half-integrals are taken over u, and dω = s du restores the scale
         self.terms
             .iter()

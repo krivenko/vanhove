@@ -668,10 +668,9 @@ mod tests {
         for dos in [honeycomb(0.0, 1.0), lieb(0.0, 1.0)] {
             let fast = dos.precomputed(None);
             let support = dos.support().unwrap();
-            let (lo, hi) = (support.min(), support.max());
             let (mut worst, mut peak) = (0.0f64, 0.0f64);
             for i in 1..500 {
-                let omega = lo + (hi - lo) * (i as f64) / 500.0;
+                let omega = support.min() + support.length() * (i as f64) / 500.0;
                 let (a, b) = (dos.continuous_at(omega), fast.continuous_at(omega));
                 if a.is_finite() && b.is_finite() {
                     worst = worst.max((b - a).abs());

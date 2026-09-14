@@ -42,6 +42,38 @@ impl Segment {
         self.min == self.max
     }
 
+    /// Length of the segment, infinite where it is unbounded.
+    pub fn length(&self) -> f64 {
+        self.max - self.min
+    }
+
+    /// Frequency halfway between the ends.
+    pub fn midpoint(&self) -> f64 {
+        // Halving each end in turn keeps the sum from overflowing
+        0.5 * self.min + 0.5 * self.max
+    }
+
+    /// The parts of the segment below and above `omega`, which must lie within it.
+    ///
+    /// The two share the frequency they are split at, so a split at an end of the
+    /// segment leaves a degenerate part rather than an empty one.
+    pub fn split_at(&self, omega: f64) -> (Segment, Segment) {
+        assert!(
+            self.contains(omega),
+            "a segment can only be split at a frequency within it"
+        );
+        (
+            Segment {
+                min: self.min,
+                max: omega,
+            },
+            Segment {
+                min: omega,
+                max: self.max,
+            },
+        )
+    }
+
     /// Smallest segment containing all of `segments`, or [`None`] where there are none.
     pub fn hull<I: IntoIterator<Item = Segment>>(segments: I) -> Option<Segment> {
         segments.into_iter().reduce(|hull, segment| Segment {
@@ -128,6 +160,44 @@ mod tests {
 
         // Zero of either sign is one frequency
         assert!(Segment::new(-0.0, 0.0).is_degenerate());
+    }
+
+    #[test]
+    fn length() {
+        assert_eq!(Segment::new(-1.5, 2.0).length(), 3.5);
+        assert_eq!(Segment::new(2.0, 2.0).length(), 0.0);
+        assert_eq!(Segment::new(-1.5, f64::INFINITY).length(), f64::INFINITY);
+    }
+
+    #[test]
+    fn midpoint() {
+        assert_eq!(Segment::new(-1.5, 2.0).midpoint(), 0.25);
+        assert_eq!(Segment::new(2.0, 2.0).midpoint(), 2.0);
+
+        // The ends are halved before they are added, leaving room for the widest
+        // segment of finite frequencies
+        let huge = Segment::new(-f64::MAX, f64::MAX);
+        assert_eq!(huge.midpoint(), 0.0);
+    }
+
+    #[test]
+    fn split_at() {
+        let segment = Segment::new(-1.5, 2.0);
+        let (lower, upper) = segment.split_at(0.5);
+        assert_eq!(lower, Segment::new(-1.5, 0.5));
+        assert_eq!(upper, Segment::new(0.5, 2.0));
+        assert_eq!(lower.length() + upper.length(), segment.length());
+
+        // A split at an end leaves a degenerate part beside the whole segment
+        let (lower, upper) = segment.split_at(-1.5);
+        assert!(lower.is_degenerate());
+        assert_eq!(upper, segment);
+    }
+
+    #[test]
+    #[should_panic(expected = "within it")]
+    fn split_at_outside() {
+        let _ = Segment::new(-1.5, 2.0).split_at(2.5);
     }
 
     #[test]

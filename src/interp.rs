@@ -26,14 +26,14 @@ impl Panel {
     /// enough at an end of the panel for the coefficients to decay geometrically.
     const MAX_ORDER: usize = 512;
 
-    /// Fit `f` over `[l, r]`, doubling the order until the tail falls below `tol`
+    /// Fit `f` over `segment`, doubling the order until the tail falls below `tol`
     /// relative to the largest coefficient.
     ///
     /// The nodes lie strictly inside the panel, so `f` is never sampled at an end of
     /// it, where a singular point may sit and the regular part be a difference of two
     /// infinities.
-    fn fit<F: Fn(f64) -> f64>(l: f64, r: f64, f: &F, tol: f64) -> Panel {
-        let (mid, half_width) = (0.5 * (l + r), 0.5 * (r - l));
+    fn fit<F: Fn(f64) -> f64>(segment: Segment, f: &F, tol: f64) -> Panel {
+        let (mid, half_width) = (segment.midpoint(), 0.5 * segment.length());
         let mut n = Self::MIN_ORDER;
         loop {
             let coeffs = chebyshev_coeffs(n, |x| f(mid + half_width * x));
@@ -119,7 +119,7 @@ impl Interpolated {
             support,
             panels: breaks
                 .windows(2)
-                .map(|lr| Panel::fit(lr[0], lr[1], &|omega| csf.regular(omega), tol))
+                .map(|lr| Panel::fit(Segment::new(lr[0], lr[1]), &|omega| csf.regular(omega), tol))
                 .collect(),
             singularities: csf.singularities().into(),
         }
@@ -201,9 +201,8 @@ mod tests {
     /// Largest departure of the interpolation from `f` over the support.
     fn worst_error<F: Fn(f64) -> f64>(interp: &Interpolated, f: F) -> f64 {
         let support = interp.support();
-        let (lo, hi) = (support.min(), support.max());
         (1..500).fold(0.0f64, |w, i| {
-            let omega = lo + (hi - lo) * (i as f64) / 500.0;
+            let omega = support.min() + support.length() * (i as f64) / 500.0;
             w.max((interp.regular(omega) - f(omega)).abs())
         })
     }
