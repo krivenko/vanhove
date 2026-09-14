@@ -26,9 +26,8 @@ use crate::singularity::{Singularity, Strength};
 /// Continuous spectral function possibly containing integrable singularities.
 ///
 /// It has the form $A(\omega) = R(\omega) + \sum_p S_p(\omega)$ for
-/// $\omega \in [\omega_{min}, \omega_{max}]$ and zero otherwise.
-/// $R(\omega)$ is a smooth function and each $S_p(\omega)$ has one isolated
-/// integrable singularity at $\Omega_p$.
+/// $\omega \in [\omega_{min}, \omega_{max}]$ and zero otherwise, each $S_p(\omega)$
+/// having one isolated integrable singularity at $\Omega_p$.
 ///
 /// $S_p(\omega)$ is described in closed form by the corresponding [`Singularity`],
 /// which fixes it over the whole support and not merely near $\Omega_p$. A support
@@ -36,9 +35,17 @@ use crate::singularity::{Singularity, Strength};
 trait ContinuousSF: Send + Sync {
     /// Support of the spectral function.
     fn support(&self) -> Segment;
-    /// Regular part, $R(\omega)$.
+    /// Regular part, $R(\omega) = A(\omega) - \sum_p S_p(\omega)$.
+    ///
+    /// Smooth between consecutive singular points, which is where it is integrated
+    /// and interpolated. How smooth is a matter of how many terms each $S_p$ carries,
+    /// one more of them buying one more derivative, and falling short of it costs
+    /// convergence rather than correctness.
     fn regular(&self, omega: f64) -> f64;
     /// Singular points $\Omega_p$ along with the closed form of $S_p$ at each.
+    ///
+    /// Every frequency where $R(\omega)$ stops being smooth belongs here, whether or
+    /// not $A(\omega)$ diverges at it.
     fn singularities(&self) -> &[Singularity] {
         &[]
     }
