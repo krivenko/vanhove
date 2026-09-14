@@ -108,7 +108,7 @@ impl InterpolatedSF {
             .singularities()
             .iter()
             .map(|s| s.position)
-            .filter(|&p| support.contains(p) && p != support.min() && p != support.max())
+            .filter(|&p| support.strictly_contains(p))
             .collect();
         breaks.push(support.min());
         breaks.push(support.max());
