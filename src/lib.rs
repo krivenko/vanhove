@@ -4,6 +4,7 @@
 
 pub mod discrete;
 pub mod models;
+pub mod segment;
 mod util;
 
 use std::f64::consts::PI;
