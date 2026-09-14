@@ -45,10 +45,10 @@ impl AsymptTerm {
         }
     }
 
-    /// Value of the term at $u$, given $\ln u$.
-    fn value(&self, u: f64, ln_u: f64) -> f64 {
+    /// Value of the term at $u$.
+    fn value(&self, u: f64) -> f64 {
         let v = self.c * self.pow.eval(u);
-        if self.log_power == 0 { v } else { v * ln_u }
+        if self.log_power == 0 { v } else { v * u.ln() }
     }
 
     /// Integral of the term over one side of $\Omega_p$ of length `l` in units of $u$,
@@ -144,8 +144,7 @@ impl Singularity {
     /// Diverges at $\Omega_p$ unless every term stays bounded there.
     pub fn value(&self, omega: f64) -> f64 {
         let u = (omega - self.position).abs() / self.scale;
-        let ln_u = u.ln();
-        self.terms.iter().map(|t| t.value(u, ln_u)).sum()
+        self.terms.iter().map(|t| t.value(u)).sum()
     }
 
     /// $\int_{\omega_{min}}^{\omega_{max}} S_p(\omega)d\omega$ over `support`, in closed
