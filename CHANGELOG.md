@@ -7,11 +7,16 @@ All notable changes to this project will be documented in this file.
 ### Added
 
 - `segment::Segment`, a segment of the frequency axis.
+- `SpectralFunction` is `Send` and `Sync`, so that frequency scans can be spread
+  over threads.
 
 ### Changed
 
 - `SpectralFunction::support()` and `DiscreteSF::support()` return a `Segment` in
   place of a pair of frequencies.
+- Adding a spectral function to one it shares a continuous contribution with sums
+  the weights of that contribution rather than listing it twice, and drops it where
+  the weights cancel.
 
 ## [0.1.1] - 2026-09-10
 
