@@ -212,47 +212,31 @@ pub fn semicircle(eps: f64, r: f64) -> SpectralFunction {
 
 /// Power-law threshold density of states.
 struct PowerLawDOS {
-    eps: f64,
-    r: f64,
     /// Band edges.
     edges: Segment,
-    /// Band edge singularity, absent for $r \geq 1$ where $A(\omega)$ is regular.
-    singularity: Box<[Singularity]>,
-    prefactor: f64,
+    /// Band edge singularity, which is the whole of $A(\omega)$.
+    singularity: [Singularity; 1],
 }
 impl PowerLawDOS {
     fn new(eps: f64, r: f64, w: f64) -> PowerLawDOS {
         assert!(r > -1.0, "asymptotics exponent must satisfy r > -1");
         assert!(w > 0.0, "bandwidth must be positive");
-        let prefactor = (r + 1.0) / (w.powf(r + 1.0));
-        // For r < 1 the whole of A(ω) is the singular part, R(ω) vanishing
-        let singularity = if r < 1.0 {
-            vec![Singularity::new(
+        PowerLawDOS {
+            edges: Segment::new(eps, eps + w),
+            singularity: [Singularity::new(
                 eps,
                 w,
                 vec![AsymptTerm::power(r, (r + 1.0) / w)],
-            )]
-        } else {
-            vec![]
-        };
-        PowerLawDOS {
-            eps,
-            r,
-            edges: Segment::new(eps, eps + w),
-            singularity: singularity.into_boxed_slice(),
-            prefactor,
+            )],
         }
-    }
-    fn value(&self, omega: f64) -> f64 {
-        self.prefactor * (omega - self.eps).powf(self.r)
     }
 }
 impl ContinuousSF for PowerLawDOS {
     fn support(&self) -> Segment {
         self.edges
     }
-    fn regular(&self, omega: f64) -> f64 {
-        if self.r < 1.0 { 0.0 } else { self.value(omega) }
+    fn regular(&self, _omega: f64) -> f64 {
+        0.0
     }
     fn singularities(&self) -> &[Singularity] {
         &self.singularity
@@ -278,47 +262,31 @@ pub fn powerlaw(eps: f64, r: f64, w: f64) -> SpectralFunction {
 
 /// Density of states with a pseudogap.
 struct PseudogapDOS {
-    eps: f64,
-    r: f64,
     /// Band edges.
     edges: Segment,
-    /// Pseudogap singularity, absent for $r \geq 1$ where $A(\omega)$ is regular.
-    singularity: Box<[Singularity]>,
-    prefactor: f64,
+    /// Pseudogap singularity, which is the whole of $A(\omega)$.
+    singularity: [Singularity; 1],
 }
 impl PseudogapDOS {
     fn new(eps: f64, r: f64, d: f64) -> PseudogapDOS {
         assert!(r > 0.0, "asymptotics exponent must be positive");
         assert!(d > 0.0, "bandwidth must be positive");
-        let prefactor = (r + 1.0) / (2.0 * d.powf(r + 1.0));
-        // For r < 1 the whole of A(ω) is the singular part, R(ω) vanishing
-        let singularity = if r < 1.0 {
-            vec![Singularity::new(
+        PseudogapDOS {
+            edges: Segment::new(eps - d, eps + d),
+            singularity: [Singularity::new(
                 eps,
                 d,
                 vec![AsymptTerm::power(r, (r + 1.0) / (2.0 * d))],
-            )]
-        } else {
-            vec![]
-        };
-        PseudogapDOS {
-            eps,
-            r,
-            edges: Segment::new(eps - d, eps + d),
-            singularity: singularity.into_boxed_slice(),
-            prefactor,
+            )],
         }
-    }
-    fn value(&self, omega: f64) -> f64 {
-        self.prefactor * (omega - self.eps).abs().powf(self.r)
     }
 }
 impl ContinuousSF for PseudogapDOS {
     fn support(&self) -> Segment {
         self.edges
     }
-    fn regular(&self, omega: f64) -> f64 {
-        if self.r < 1.0 { 0.0 } else { self.value(omega) }
+    fn regular(&self, _omega: f64) -> f64 {
+        0.0
     }
     fn singularities(&self) -> &[Singularity] {
         &self.singularity
@@ -1041,17 +1009,13 @@ mod tests {
         let log_weight = 4.0 * (SQRT_2 - (1.0 + SQRT_2).ln()) / PI.powi(2);
         check_asympt_int(&LiebDOS::new(eps, t), &[log_weight, 2.0 / PI, log_weight]);
 
-        // For r < 1 the singular part carries the whole unit weight of A(ω), while for
-        // r >= 1 there is no singularity left to integrate
-        for r in [-0.5f64, 0.0, 0.5] {
+        // A pure power law is its own asymptotics, whatever the exponent, so the
+        // singular part carries the whole unit weight of A(ω)
+        for r in [-0.5f64, 0.0, 0.5, 1.0, 1.5, 2.5] {
             check_asympt_int(&PowerLawDOS::new(eps, r, 2.0), &[1.0]);
         }
-        for r in [0.5f64, 0.9] {
+        for r in [0.5f64, 1.0, 1.5, 2.5] {
             check_asympt_int(&PseudogapDOS::new(eps, r, 2.0), &[1.0]);
-        }
-        for r in [1.0f64, 2.5] {
-            check_asympt_int(&PowerLawDOS::new(eps, r, 2.0), &[]);
-            check_asympt_int(&PseudogapDOS::new(eps, r, 2.0), &[]);
         }
     }
 
