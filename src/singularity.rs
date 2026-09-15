@@ -335,8 +335,7 @@ mod tests {
                     sing.value(omega)
                 }
             },
-            omega_min,
-            omega_max,
+            Segment::new(omega_min, omega_max),
             1e-8,
         )
         .unwrap()
