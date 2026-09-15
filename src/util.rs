@@ -7,6 +7,8 @@ use bilby::{
     integrate_semi_infinite_lower, integrate_semi_infinite_upper,
 };
 
+use crate::segment::Segment;
+
 /// Dispatch for the power function $u^r$ with a fixed exponent `r`.
 ///
 /// `powf()` costs an order of magnitude more than `sqrt()`, which is worth avoiding
@@ -117,14 +119,12 @@ pub fn clenshaw_chebyshev(coeffs: &[f64], x: f64) -> f64 {
 /// Call a bilby adaptive integration function depending on the integration limits.
 pub fn bilby_integrate<F: Fn(f64) -> f64>(
     f: F,
-    a: f64,
-    b: f64,
+    segment: Segment,
     tol: f64,
 ) -> Result<QuadratureResult<f64>, QuadratureError> {
-    let a_inf = a.is_infinite();
-    let b_inf = b.is_infinite();
+    let (a, b) = (segment.min(), segment.max());
     // Choose a bilby call depending on the integration limits
-    match (a_inf, b_inf) {
+    match (a.is_infinite(), b.is_infinite()) {
         (false, false) => adaptive_integrate(f, a, b, tol),
         (false, true) => {
             assert!(b > 0.0);
@@ -139,6 +139,13 @@ pub fn bilby_integrate<F: Fn(f64) -> f64>(
             integrate_infinite(f, tol)
         }
     }
+}
+
+/// The same, carrying back nothing where the quadrature refuses the request rather than
+/// an error to unwrap.
+#[allow(dead_code)]
+pub fn bilby_integrate_or_0<F: Fn(f64) -> f64>(f: F, segment: Segment, tol: f64) -> f64 {
+    bilby_integrate(f, segment, tol).map_or(0.0, |r| r.value)
 }
 
 /// Fermi step function.
@@ -233,36 +240,61 @@ mod tests {
 
     #[test]
     fn bilby_integrate() {
+        use crate::segment::Segment;
         let pi = std::f64::consts::PI;
         let inf = f64::INFINITY;
         assert_abs_diff_eq!(
-            util::bilby_integrate(move |x| x.cos() * x.cos(), -pi, pi, 1e-12)
+            util::bilby_integrate(move |x| x.cos() * x.cos(), Segment::new(-pi, pi), 1e-12)
                 .unwrap()
                 .value,
             pi,
             epsilon = 1e-12
         );
         assert_abs_diff_eq!(
-            util::bilby_integrate(move |x| (-x * x / 2.0).exp(), -inf, inf, 1e-12)
-                .unwrap()
-                .value,
+            util::bilby_integrate(
+                move |x| (-x * x / 2.0).exp(),
+                Segment::new(-inf, inf),
+                1e-12
+            )
+            .unwrap()
+            .value,
             (2.0 * pi).sqrt(),
             epsilon = 1e-12
         );
         assert_abs_diff_eq!(
-            util::bilby_integrate(move |x| (2.0 * x).exp(), -inf, 0.0, 1e-12)
+            util::bilby_integrate(move |x| (2.0 * x).exp(), Segment::new(-inf, 0.0), 1e-12)
                 .unwrap()
                 .value,
             0.5,
             epsilon = 1e-12
         );
         assert_abs_diff_eq!(
-            util::bilby_integrate(move |x| (-2.0 * x).exp(), 0.0, inf, 1e-12)
+            util::bilby_integrate(move |x| (-2.0 * x).exp(), Segment::new(0.0, inf), 1e-12)
                 .unwrap()
                 .value,
             0.5,
             epsilon = 1e-12
         );
+    }
+
+    #[test]
+    fn bilby_integrate_or_0() {
+        use crate::segment::Segment;
+        use std::f64::consts::E;
+
+        assert_abs_diff_eq!(
+            util::bilby_integrate_or_0(f64::exp, Segment::new(0.0, 1.0), 1e-12),
+            E - 1.0,
+            epsilon = 1e-12
+        );
+
+        // A segment of zero length integrates to nothing
+        let point = Segment::new(1.0, 1.0);
+        assert_eq!(util::bilby_integrate_or_0(f64::exp, point, 1e-12), 0.0);
+
+        // Where the quadrature refuses the request there is no value to carry back
+        let unit = Segment::new(0.0, 1.0);
+        assert_eq!(util::bilby_integrate_or_0(f64::exp, unit, -1.0), 0.0);
     }
 
     #[test]
