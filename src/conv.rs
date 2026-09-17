@@ -558,37 +558,67 @@ fn features(csf: &dyn ContinuousSF) -> Vec<f64> {
 /// deriving it and a double count to be had by trying: two band edges of equal width
 /// would each claim the whole of it. Such a position enters with no terms, saying where
 /// the interpolation must start a fresh panel and nothing more.
-pub fn pair_singularities(c1: &dyn ContinuousSF, c2: &dyn ContinuousSF) -> Vec<Singularity> {
-    // A singular part sitting at an end of the support has no side there. `local_form()`
-    // does not know that — it reads the term as written, and a term written for both
-    // sides would otherwise have a band edge convolve as though the band ran on through
-    // it, which is a factor of two at every van Hove point.
-    let reaching = |sing: &Singularity, support: Segment| -> Vec<LocalTerm> {
-        let below = sing.position > support.min();
-        let above = sing.position < support.max();
-        sing.local_form()
-            .into_iter()
-            .map(|t| LocalTerm {
-                c_below: if below { t.c_below } else { 0.0 },
-                c_above: if above { t.c_above } else { 0.0 },
-                ..t
-            })
-            .collect()
+/// Local form of `csf` about `position`: the terms of a singularity sitting there, and
+/// the value everything else takes, kept apart.
+///
+/// Each is zeroed on the side the support does not reach. A singular part at an end of
+/// its support has no side there, and reading a term as written would have a band edge
+/// convolve as though the band ran on through it.
+fn local_form_at(csf: &dyn ContinuousSF, position: f64) -> (Vec<LocalTerm>, LocalTerm) {
+    let support = csf.support();
+    let (reaches_below, reaches_above) = (position > support.min(), position < support.max());
+    let sided = |exponent, log_power, c_below: f64, c_above: f64| LocalTerm {
+        exponent,
+        log_power,
+        c_below: if reaches_below { c_below } else { 0.0 },
+        c_above: if reaches_above { c_above } else { 0.0 },
     };
 
-    let (s1, s2) = (c1.support(), c2.support());
+    let mut singular = Vec::new();
+    let mut constant = csf.regular(position);
+    for sing in csf.singularities() {
+        if sing.position == position {
+            singular.extend(
+                sing.local_form()
+                    .into_iter()
+                    .map(|t| sided(t.exponent, t.log_power, t.c_below, t.c_above)),
+            );
+        } else {
+            constant += sing.value(position);
+        }
+    }
+    (singular, sided(0.0, 0, constant, constant))
+}
+
+/// Singular structure of $C_1 \ast C_2$.
+///
+/// $\int C_1(\nu) C_2(\omega-\nu) d\nu$ stops being smooth in $\omega$ where both factors
+/// stop being smooth at one and the same $\nu$, that is where $\nu = \Omega_1$ and
+/// $\omega - \nu = \Omega_2$ hold together. The positions are therefore the pairwise sums,
+/// and the ends of a support count: that is where a factor stops contributing at all.
+///
+/// Every pair of local terms is convolved but one: the two constants. That product is
+/// $R \ast R$, which leaves a kink going as $|\Delta|$ or milder — a polynomial either
+/// side of the panel boundary it sits on, and fitted there exactly. Deriving it would
+/// gain nothing and cost the equal-width case, where two band edges of the same width
+/// would each claim the whole of the same kink. Everything with a singular part on one
+/// side or the other is derived.
+pub fn pair_singularities(c1: &dyn ContinuousSF, c2: &dyn ContinuousSF) -> Vec<Singularity> {
     let mut derived: Vec<(f64, Vec<AsymptTerm>)> = Vec::new();
-    for sing1 in c1.singularities() {
-        let f = reaching(sing1, s1);
-        for sing2 in c2.singularities() {
-            let g = reaching(sing2, s2);
+    for p1 in features(c1) {
+        let (singular1, constant1) = local_form_at(c1, p1);
+        for p2 in features(c2) {
+            let (singular2, constant2) = local_form_at(c2, p2);
             let mut terms = Vec::new();
-            for &t1 in &f {
-                for &t2 in &g {
+            for &t1 in &singular1 {
+                for &t2 in singular2.iter().chain(std::iter::once(&constant2)) {
                     terms.extend(convolve_terms(t1, t2, 1.0));
                 }
             }
-            merge(&mut derived, sing1.position + sing2.position, terms);
+            for &t2 in &singular2 {
+                terms.extend(convolve_terms(constant1, t2, 1.0));
+            }
+            merge(&mut derived, p1 + p2, terms);
         }
     }
 
@@ -708,13 +738,25 @@ mod tests {
                 flat(0.0, 1.5, 0.0),
                 1e-13,
             ),
-            // A band edge where one factor merely stops is not derived, and the square
-            // root left behind is what the fit has to work at
+            // A band edge where one factor merely stops still pairs, its local form
+            // being a constant, so the square root there is derived like any other
             (
                 "chain against square",
                 chain(0.0, 1.0),
                 square(0.0, 1.0),
-                1e-7,
+                1e-11,
+            ),
+            (
+                "square against square",
+                square(0.0, 1.0),
+                square(0.0, 1.0),
+                1e-11,
+            ),
+            (
+                "triangular against itself",
+                triangular(0.0, 1.0),
+                triangular(0.0, 1.0),
+                1e-11,
             ),
         ];
         for (name, a, b, want) in cases {
@@ -732,6 +774,23 @@ mod tests {
                 fitted.fit_error()
             );
         }
+    }
+
+    /// Two band edges of the same width meet at one frequency, and neither has a
+    /// singular part: nothing pairs there, so neither can claim the kink twice.
+    #[test]
+    fn equal_band_edges_derive_nothing() {
+        let d = 1.5f64;
+        let (a, b) = (flat(0.0, d, 0.0), flat(0.0, d, 0.0));
+        let derived = pair_singularities(only(&a), only(&b));
+        assert_eq!(derived.len(), 3);
+        assert!(derived.iter().all(|s| s.is_trivial()));
+
+        // The kink is left to the regular part, which is where it is fitted exactly
+        let h = 1e-3f64;
+        let at = |w: f64| pair_value(only(&a), only(&b), w, 1e-13);
+        let kink = (at(h) + at(-h) - 2.0 * at(0.0)) / (2.0 * h);
+        assert_relative_eq!(kink, -1.0 / (4.0 * d * d), max_relative = 1e-9);
     }
 
     /// Two boxes convolve into a triangle, which is worth knowing exactly.

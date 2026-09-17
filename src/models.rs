@@ -991,15 +991,10 @@ pub fn lieb(eps: f64, t: f64) -> SpectralFunction {
 /// the square lattice being itself two chains. The band runs from $\epsilon - 6t$ to
 /// $\epsilon + 6t$, with band edges at $\pm 6t$ and van Hove saddles at $\pm 2t$.
 ///
-/// Nothing of that structure is written down here. It is derived from the two operands
-/// by [`SpectralFunction::conv()`].
-///
-/// The values are the convolution itself and carry no approximation, but the asymptotics
-/// reported at the saddles is not the whole of the local form. Two pairs of features meet
-/// there — a chain band edge against the square lattice logarithm, and the other chain
-/// band edge against the square lattice band edge — and only the first is a pair of
-/// singular parts. The second has nothing singular on the square lattice side, so it is
-/// not derived, and what is left of it stays in the regular part.
+/// Nothing of that structure is written down here, not the positions and not the
+/// coefficients. It is derived from the two operands by [`SpectralFunction::conv()`],
+/// which finds $1/4\pi^2 t^{3/2}$ at the band edges and $-3/4\pi^2 t^{3/2}$ at the
+/// saddles to nine digits.
 pub fn simple_cubic(eps: f64, t: f64) -> SpectralFunction {
     assert!(t > 0.0, "hopping constant must be positive");
     chain(eps, t).conv(&square(0.0, t), None)
@@ -1754,6 +1749,32 @@ mod tests {
             let side = if saddle < 0.0 { -1.0 } else { 1.0 };
             let ratio = sing.value(saddle + side * near) / sing.value(saddle + side * far);
             assert_relative_eq!(ratio, (near / far).sqrt(), max_relative = 1e-6);
+
+            // and its coefficient is the one the literature gives, -3/4π²t^{3/2}
+            let d = 1e-8f64;
+            let coefficient = sing.value(saddle + side * d) / d.sqrt();
+            assert_relative_eq!(
+                coefficient,
+                -3.0 / (4.0 * std::f64::consts::PI.powi(2) * t.powf(1.5)),
+                max_relative = 1e-7
+            );
+        }
+
+        // The band edges carry the same square root at +1/4π²t^{3/2}
+        for edge in [-6.0 * t, 6.0 * t] {
+            let sing = csf
+                .singularities()
+                .iter()
+                .find(|s| s.position == edge)
+                .unwrap();
+            assert!(!sing.is_trivial());
+            let (d, side) = (1e-8f64, if edge < 0.0 { 1.0 } else { -1.0 });
+            let coefficient = sing.value(edge + side * d) / d.sqrt();
+            assert_relative_eq!(
+                coefficient,
+                1.0 / (4.0 * std::f64::consts::PI.powi(2) * t.powf(1.5)),
+                max_relative = 1e-7
+            );
         }
     }
 
