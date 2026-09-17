@@ -6,6 +6,17 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- `SpectralFunction::conv()`, the convolution of two spectral functions. The
+  singular structure of the result is automatically derived: its van Hove points
+  are the pairwise sums of the frequencies where either factor stops being
+  smooth, and the asymptotics at each follows from the asymptotic forms of the two.
+- `models::simple_cubic()`, density of states of a simple cubic lattice, computed
+  as the convolution of a linear chain with a square lattice.
+- The continuous spectral function interface is public: the `ContinuousSF` trait,
+  `singularity::Singularity` and `singularity::AsymptTerm` describing a singular
+  part in closed form, `interp::InterpolatedSF`, `discrete::DiscreteSF`, and
+  `SpectralFunction::from_continuous()`. A model defined outside the crate can
+  now be turned into a spectral function.
 - `segment::Segment`, a segment of the frequency axis.
 - `SpectralFunction` is `Send` and `Sync`, so that frequency scans can be spread
   over threads.
