@@ -18,6 +18,9 @@ All notable changes to this project will be documented in this file.
   `SpectralFunction::from_continuous()`. A model defined outside the crate can
   now be turned into a spectral function.
 - `segment::Segment`, a segment of the frequency axis.
+- The `theory` module, a prose account of the splitting of a spectral function
+  into discrete, regular and singular parts, what `integrate()` does with it, and
+  the mathematics behind `conv()`.
 - `SpectralFunction` is `Send` and `Sync`, so that frequency scans can be spread
   over threads.
 
