@@ -32,27 +32,16 @@ impl AsymptTerm {
         AsymptTerm::make(0.0, 1, -c, -c)
     }
 
-    /// $c^\pm u^r$, with a coefficient of its own on either side of $\Omega_p$.
+    /// $c^\pm u^r \ln^m u$, with a coefficient of its own on either side of $\Omega_p$.
     ///
-    ///
-    /// Restricted to $r > 0$, where the term vanishes at $\Omega_p$: one that survives
-    /// there has to approach the same value from either side, $A(\omega)$ having no
-    /// jump at a singular point.
-    #[allow(dead_code)]
-    pub fn sided(exponent: f64, c_below: f64, c_above: f64) -> AsymptTerm {
-        assert!(
-            exponent > 0.0,
-            "a side-dependent term must vanish at the singular point"
-        );
-        AsymptTerm::make(exponent, 0, c_below, c_above)
+    /// A convolution derives terms in this shape and no other, the two sides of a pair
+    /// drawing on different stretches of the integral.
+    pub fn sided_log(exponent: f64, log_power: u8, c_below: f64, c_above: f64) -> AsymptTerm {
+        AsymptTerm::make(exponent, log_power, c_below, c_above)
     }
 
     fn make(exponent: f64, log_power: u8, c_below: f64, c_above: f64) -> AsymptTerm {
         assert!(exponent > -1.0, "asymptotics exponent must satisfy r > -1");
-        assert!(
-            log_power <= 1,
-            "at most one logarithmic factor is supported"
-        );
         AsymptTerm {
             // -0.0 would sort below +0.0 in `Strength`, and the two are the same exponent
             exponent: if exponent == 0.0 { 0.0 } else { exponent },
@@ -67,7 +56,11 @@ impl AsymptTerm {
     fn value(&self, below: bool, u: f64) -> f64 {
         let c = if below { self.c_below } else { self.c_above };
         let v = c * self.pow.eval(u);
-        if self.log_power == 0 { v } else { v * u.ln() }
+        if self.log_power == 0 {
+            v
+        } else {
+            v * u.ln().powi(i32::from(self.log_power))
+        }
     }
 
     /// Integral of the term with coefficient `c` over one side of $\Omega_p$ of length
@@ -79,11 +72,13 @@ impl AsymptTerm {
         }
         let rp1 = self.exponent + 1.0;
         let lp = l.powf(rp1);
-        if self.log_power == 0 {
-            c * lp / rp1
-        } else {
-            c * lp * (l.ln() / rp1 - 1.0 / (rp1 * rp1))
+        // Each logarithm is integrated by parts against the one below it,
+        // I_m = (l^{r+1} ln^m l - m I_{m-1}) / (r+1)
+        let (ln_l, mut integral) = (l.ln(), lp / rp1);
+        for k in 1..=i32::from(self.log_power) {
+            integral = (lp * ln_l.powi(k) - f64::from(k) * integral) / rp1;
         }
+        c * integral
     }
 
     /// Strength of the term as $\omega \to \Omega_p$.
@@ -398,7 +393,7 @@ mod tests {
     #[test]
     fn sided() {
         // 3u below Ω_p and 5u above it, with Ω_p at the origin and u = |ω|
-        let sing = Singularity::new(0.0, 1.0, vec![AsymptTerm::sided(1.0, 3.0, 5.0)]);
+        let sing = Singularity::new(0.0, 1.0, vec![AsymptTerm::sided_log(1.0, 0, 3.0, 5.0)]);
         for omega in [-2.0f64, -0.5, 0.5, 2.0] {
             let c = if omega < 0.0 { 3.0 } else { 5.0 };
             assert_relative_eq!(sing.value(omega), c * omega.abs(), max_relative = 1e-14);
@@ -413,7 +408,7 @@ mod tests {
         );
 
         // The scale divides the distance on both sides alike
-        let scaled = Singularity::new(0.0, 2.0, vec![AsymptTerm::sided(1.0, 3.0, 5.0)]);
+        let scaled = Singularity::new(0.0, 2.0, vec![AsymptTerm::sided_log(1.0, 0, 3.0, 5.0)]);
         assert_relative_eq!(scaled.value(-2.0), 3.0, max_relative = 1e-14);
         assert_relative_eq!(scaled.value(2.0), 5.0, max_relative = 1e-14);
 
@@ -427,9 +422,37 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "must vanish at the singular point")]
-    fn sided_surviving_at_the_point() {
-        let _ = AsymptTerm::sided(0.0, 1.0, 2.0);
+    fn many_logarithms() {
+        // A term may carry any number of logarithms, and its integral follows the
+        // recurrence rather than a closed form written out per power
+        let sing = Singularity::new(0.0, 1.0, vec![AsymptTerm::sided_log(-0.5, 2, 1.0, 1.0)]);
+        let u = 0.25f64;
+        assert_relative_eq!(
+            sing.value(u),
+            u.powf(-0.5) * u.ln().powi(2),
+            max_relative = 1e-14
+        );
+
+        // ∫_0^l u^r ln^2 u du against the quadrature it stands for
+        let l = 0.75f64;
+        let reference = crate::util::bilby_integrate(
+            |u: f64| {
+                if u <= 0.0 {
+                    0.0
+                } else {
+                    u.powf(-0.5) * u.ln().powi(2)
+                }
+            },
+            Segment::new(0.0, l),
+            1e-13,
+        )
+        .unwrap()
+        .value;
+        assert_relative_eq!(
+            sing.integral(Segment::new(0.0, l)),
+            reference,
+            max_relative = 1e-9
+        );
     }
 
     #[test]

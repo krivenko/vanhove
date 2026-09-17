@@ -87,7 +87,7 @@ fn recip_gamma_derivatives(z: f64, n: usize) -> Vec<f64> {
 /// Taken through $B = \Gamma(\alpha)\Gamma(\gamma)\cdot\frac{1}{\Gamma(\alpha+\gamma)}$
 /// rather than through $\ln B$, so that a pole of $\Gamma(\alpha+\gamma)$ is the zero of
 /// an entire function rather than an infinity to cancel against another.
-fn beta_derivatives(alpha: f64, gamma: f64, a_max: usize, b_max: usize) -> Vec<Vec<f64>> {
+pub fn beta_derivatives(alpha: f64, gamma: f64, a_max: usize, b_max: usize) -> Vec<Vec<f64>> {
     let ga = gamma_derivatives(alpha, a_max);
     let gc = gamma_derivatives(gamma, b_max);
     let r = recip_gamma_derivatives(alpha + gamma, a_max + b_max);
@@ -485,6 +485,98 @@ pub fn incomplete_beta_derivatives(
                 .collect()
         })
         .collect()
+}
+
+/// What an outer stretch contributes to the logarithms at a whole-number $r$, indexed
+/// by the power of $\ln|\Delta|$.
+///
+/// The stretch integrates over the factor `own` and sees `other` displaced by $\Delta$.
+///
+/// At a whole number the generic formula loses its finite parts to a pole of
+/// $\Gamma(-r)$, but not its content: writing $r = n + \epsilon$ makes
+/// $|\Delta|^r = |\Delta|^n e^{\epsilon\ln|\Delta|}$, so a pole of order $p$ meets
+/// $\epsilon^p \ln^p|\Delta|/p!$ and leaves a logarithm behind. What survives is
+/// $$
+///     \sum_k \ln^k|\Delta| \sum_j \frac{(X_k)_{-j}}{j!} \ln^j|\Delta|,
+/// $$
+/// the $(X_k)_{-j}$ being the Laurent coefficients of the generic answer. The pole
+/// itself cancels against the truncation, which is why the $\ln^0$ coefficient is left
+/// to the caller: it is the one the truncation reaches.
+pub fn outer_stretch_logs(
+    r_own: f64,
+    m_own: usize,
+    r_other: f64,
+    m_other: usize,
+    n: usize,
+) -> Vec<f64> {
+    let degree = m_own + m_other;
+    let w = degree + 6;
+    let alpha = r_own + 1.0;
+
+    // Γ^(b)(γ) at γ = -n-ε, each a derivative of the one before since dγ = -dε
+    let mut g_gamma = vec![gamma_pole_series(n, w)];
+    for b in 0..degree {
+        g_gamma.push(g_gamma[b].diff().scaled(-1.0));
+    }
+    // Γ^(a)(α) are plain numbers, α being fixed
+    let g_alpha = gamma_derivatives(alpha, degree);
+    // R = 1/Γ at α+γ = -r_other-ε, entire and so an ordinary Taylor series
+    let rg = recip_gamma_derivatives(-r_other, 2 * degree + 2 * w + 2);
+    let factorial = |k: usize| (1..=k).map(|i| i as f64).product::<f64>();
+    let r_series = |k: usize| {
+        let t: Vec<f64> = (0..=2 * w)
+            .map(|j| {
+                let sign = if j.is_multiple_of(2) { 1.0 } else { -1.0 };
+                rg[k + j] * sign / factorial(j)
+            })
+            .collect();
+        Laurent::from_taylor(w, &t)
+    };
+
+    // ∂_α^a ∂_γ^b B by Leibniz, as in the generic table
+    let mut table = vec![vec![Laurent::zero(w); degree + 1]; degree + 1];
+    for a in 0..=degree {
+        let ca = binomials(a);
+        for b in 0..=degree {
+            let cb = binomials(b);
+            for i in 0..=a {
+                for j in 0..=b {
+                    let f = ca[i] * cb[j] * g_alpha[a - i];
+                    let term = g_gamma[b - j].mul(&r_series(i + j)).scaled(f);
+                    table[a][b].add(&term);
+                }
+            }
+        }
+    }
+
+    // X_k, built exactly as the generic formula builds it
+    let (c_own, c_other) = (binomials(m_own), binomials(m_other));
+    let mut x = vec![Laurent::zero(w); degree + 1];
+    for a in 0..=m_own {
+        let inner = binomials(a);
+        for b in 0..=m_other {
+            let mut acc = Laurent::zero(w);
+            for i in 0..=a {
+                let sign = if (i + b).is_multiple_of(2) { 1.0 } else { -1.0 };
+                acc.add(&table[a - i][i + b].scaled(inner[i] * sign));
+            }
+            let scaled = acc.scaled(c_own[a] * c_other[b]);
+            x[degree - a - b].add(&scaled);
+        }
+    }
+
+    let mut out = vec![0.0; degree + 2];
+    for (k, xk) in x.iter().enumerate() {
+        for j in 0..=degree + 1 {
+            let c = xk.at(-(j as isize));
+            if c != 0.0 {
+                out[k + j] += c / factorial(j);
+            }
+        }
+    }
+    // The truncation reaches this one, so the caller decides it
+    out[0] = 0.0;
+    out
 }
 
 #[cfg(test)]

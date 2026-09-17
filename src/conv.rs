@@ -11,11 +11,16 @@
 //! first needs no care at all, and the middle two need one subtraction each against a
 //! factor that is smooth by construction.
 
-use crate::beta::incomplete_beta_derivatives;
+use crate::beta::{beta_derivatives, incomplete_beta_derivatives, outer_stretch_logs};
 use crate::segment::Segment;
-use crate::singularity::{LocalTerm, Singularity};
-use crate::util::{bilby_integrate_or_0, binomials};
+use crate::singularity::{AsymptTerm, LocalTerm, Singularity};
+use crate::util::{bilby_integrate_or_0, binomials, is_natural};
 use crate::{ContinuousSF, SpectralFunction};
+
+/// Exponent above which a derived term is smooth enough to leave to the interpolation.
+///
+/// $|\Delta|^2$ has two derivatives, which is more than a panel boundary asks for.
+const MAX_DERIVED_EXPONENT: f64 = 2.0;
 
 /// Regular part of a contribution, zero where it does not reach.
 fn regular(csf: &dyn ContinuousSF, omega: f64) -> f64 {
@@ -385,6 +390,164 @@ pub fn support(a: &SpectralFunction, b: &SpectralFunction) -> Segment {
     Segment::new(x.min() + y.min(), x.max() + y.max())
 }
 
+/// What the three stretches contribute where $r$ is a non-negative integer $n$.
+///
+/// $\Delta^n$ is analytic, and the outer stretches no longer converge: their integrands
+/// go as $u^{n-1}$ at large $u$, so one term of the expansion of $(1+1/u)^{r_2}$
+/// integrates to a logarithm rather than a power. That logarithm is the whole of what an
+/// outer stretch leaves behind, the rest of it being analytic in $\Delta$ and carried by
+/// the closed form.
+///
+/// So a convolution gains a logarithm exactly where the generic formula loses one to a
+/// pole of $\Gamma(-r)$. Two locally constant factors are the case $r_1 = r_2 = 0$,
+/// $n = 1$, where the binomials ask for more than they have and vanish: that is why two
+/// smooth constants convolve into no logarithm at all, and why a van Hove saddle in
+/// three dimensions is a square root rather than a peak.
+fn degenerate_stretches(t1: LocalTerm, t2: LocalTerm, n: usize) -> [Vec<f64>; 3] {
+    let (r1, r2) = (t1.exponent, t2.exponent);
+    let (m1, m2) = (usize::from(t1.log_power), usize::from(t2.log_power));
+    let degree = m1 + m2 + 1;
+    // Δ^n carrying no logarithm is analytic, so it is no part of the singular structure.
+    // It is not dropped but handed over: the closed form computes the convolution whole,
+    // and what the asymptotics does not claim stays in the regular part exactly.
+    let pad = |mut v: Vec<f64>| {
+        v.resize(degree + 1, 0.0);
+        v[0] = 0.0;
+        v
+    };
+    [
+        pad(middle_coefficients(r1, m1, r2, m2)),
+        pad(outer_stretch_logs(r1, m1, r2, m2, n)),
+        pad(outer_stretch_logs(r2, m2, r1, m1, n)),
+    ]
+}
+
+/// What the middle stretch contributes to the coefficient of
+/// $|\Delta|^r\ln^k|\Delta|$, indexed by $k$.
+///
+/// $\alpha$ and $\beta$ are both positive whatever $r$ comes to, so this is the one
+/// stretch that never meets a pole, and it is used at a whole-number $r$ unchanged.
+fn middle_coefficients(r1: f64, m1: usize, r2: f64, m2: usize) -> Vec<f64> {
+    let degree = m1 + m2;
+    let (c1, c2) = (binomials(m1), binomials(m2));
+    let table = beta_derivatives(r1 + 1.0, r2 + 1.0, m1, m2);
+    let mut mid = vec![0.0; degree + 1];
+    for a in 0..=m1 {
+        for b in 0..=m2 {
+            mid[degree - a - b] += c1[a] * c2[b] * table[a][b];
+        }
+    }
+    mid
+}
+
+/// What the three stretches contribute to the coefficient of $|\Delta|^r\ln^k|\Delta|$,
+/// in the order middle, lower, upper, each indexed by $k$.
+///
+/// Substituting the length of the stretch out of the integral turns every logarithm into
+/// $\ln|\Delta| + \ln(\text{something of order one})$, and expanding those binomials
+/// leaves $|\Delta|^r$ times a polynomial in $\ln|\Delta|$ of degree $m_1 + m_2$. Its
+/// coefficients are the integrals
+/// $$
+///     \int_0^1 t^{r_1}(1-t)^{r_2}\ln^a t \ln^b(1-t)\\,dt
+///         = \partial_\alpha^a \partial_\beta^b B(\alpha, \beta)
+/// $$
+/// over the middle stretch, at $\alpha = r_1+1$, $\beta = r_2+1$, and
+/// $$
+///     \int_0^\infty u^{r_1}(1+u)^{r_2}\ln^a u \ln^b(1+u)\\,du
+///         = (\partial_\alpha - \partial_\gamma)^a(-\partial_\gamma)^b B(\alpha, \gamma)
+/// $$
+/// over an outer one, at $\gamma = -r$: there $\ln(1+u)$ is $-\partial_\gamma$ and
+/// $\ln u$ the difference of the two, the integrand carrying $\alpha$ in both factors.
+fn stretches(t1: LocalTerm, t2: LocalTerm) -> [Vec<f64>; 3] {
+    let (r1, r2) = (t1.exponent, t2.exponent);
+    let (m1, m2) = (usize::from(t1.log_power), usize::from(t2.log_power));
+    let r = r1 + r2 + 1.0;
+    let degree = m1 + m2;
+    let (c1, c2) = (binomials(m1), binomials(m2));
+
+    let mid = middle_coefficients(r1, m1, r2, m2);
+
+    // An outer stretch runs from its cut out to the end of the overlap, a length that
+    // enters only analytically in Δ; what survives is the finite part below
+    let outer = |ra: f64, rb: f64, ca: &[f64], cb: &[f64], ma: usize, mb: usize| {
+        let table = beta_derivatives(ra + 1.0, -r, ma, ma + mb);
+        let mut out = vec![0.0; degree + 1];
+        for a in 0..=ma {
+            let inner = binomials(a);
+            for b in 0..=mb {
+                // (∂_α - ∂_γ)^a (-∂_γ)^b = Σ_i C(a,i) (-1)^{i+b} ∂_α^{a-i} ∂_γ^{i+b}
+                let value: f64 = (0..=a)
+                    .map(|i| {
+                        let sign = if (i + b).is_multiple_of(2) { 1.0 } else { -1.0 };
+                        inner[i] * sign * table[a - i][i + b]
+                    })
+                    .sum();
+                out[degree - a - b] += ca[a] * cb[b] * value;
+            }
+        }
+        let _ = rb;
+        out
+    };
+
+    [
+        mid,
+        outer(r1, r2, &c1, &c2, m1, m2),
+        outer(r2, r1, &c2, &c1, m2, m1),
+    ]
+}
+
+/// Terms of $T_1 \ast T_2$ at $\Omega_1 + \Omega_2$, empty where the pair is one this
+/// does not reach.
+///
+/// The result spans $|\Delta|^r \ln^k|\Delta|$ for $k$ up to $m_1 + m_2$, each
+/// coefficient the three stretches added together with the sides they draw on:
+/// $$
+///     C^+_k = c_1^+ c_2^+ X^{mid}_k + c_1^- c_2^+ X^{lo}_k + c_1^+ c_2^- X^{hi}_k,
+/// $$
+/// and $C^-_k$ the same with every $\pm$ flipped.
+fn convolve_terms(t1: LocalTerm, t2: LocalTerm, weight: f64) -> Vec<AsymptTerm> {
+    let r = t1.exponent + t2.exponent + 1.0;
+    if r >= MAX_DERIVED_EXPONENT {
+        return Vec::new();
+    }
+    let [mid, lo, hi] = if is_natural(r) {
+        degenerate_stretches(t1, t2, r as usize)
+    } else {
+        stretches(t1, t2)
+    };
+    let (cb1, ca1, cb2, ca2) = (t1.c_below, t1.c_above, t2.c_below, t2.c_above);
+
+    let mut terms = Vec::new();
+    for k in (0..mid.len()).rev() {
+        let combine = |x1: f64, x2: f64, x3: f64| {
+            (
+                weight * (cb1 * cb2 * x1 + ca1 * cb2 * x2 + cb1 * ca2 * x3),
+                weight * (ca1 * ca2 * x1 + cb1 * ca2 * x2 + ca1 * cb2 * x3),
+            )
+        };
+        let (c_below, c_above) = combine(mid[k], lo[k], hi[k]);
+        if c_below == 0.0 && c_above == 0.0 {
+            continue;
+        }
+        // A constant may differ between the sides here: where r is zero the term sits
+        // under a logarithm that diverges, so there is no finite value at Ω_p for the
+        // two sides to disagree on
+        terms.push(AsymptTerm::sided_log(r, k as u8, c_below, c_above));
+    }
+    terms
+}
+
+/// Add `terms` to whatever has already been derived at `position`.
+fn merge(derived: &mut Vec<(f64, Vec<AsymptTerm>)>, position: f64, terms: Vec<AsymptTerm>) {
+    if terms.is_empty() {
+        return;
+    }
+    match derived.iter_mut().find(|(p, _)| *p == position) {
+        Some((_, existing)) => existing.extend(terms),
+        None => derived.push((position, terms)),
+    }
+}
+
 /// Frequencies at which a contribution stops being smooth: its singular points, and
 /// the ends of its support, where it stops contributing at all.
 fn features(csf: &dyn ContinuousSF) -> Vec<f64> {
@@ -397,17 +560,65 @@ fn features(csf: &dyn ContinuousSF) -> Vec<f64> {
     out
 }
 
+/// Local form of $C_A \ast C_B$ wherever a singular part of one factor meets one of the
+/// other.
+///
+/// Only singular parts pair. A support end where nothing diverges leaves a kink going as
+/// $|\Delta|$ or milder, which is a polynomial either side of the panel boundary it sits
+/// on and is fitted there exactly, so there is nothing to gain by deriving it and a
+/// double count to be had by trying: two band edges of equal width would each claim the
+/// whole of it.
+fn derived_terms(a: &SpectralFunction, b: &SpectralFunction) -> Vec<(f64, Vec<AsymptTerm>)> {
+    // A singular part sitting at an end of the support has no side there. `local_form()`
+    // does not know that — it reads the term as written, and a term written for both
+    // sides would otherwise have a band edge convolve as though the band continued
+    // through it, which is a factor of two at every van Hove point.
+    let reaching = |sing: &Singularity, support: Segment| -> Vec<LocalTerm> {
+        let below = sing.position > support.min();
+        let above = sing.position < support.max();
+        sing.local_form()
+            .into_iter()
+            .map(|t| LocalTerm {
+                c_below: if below { t.c_below } else { 0.0 },
+                c_above: if above { t.c_above } else { 0.0 },
+                ..t
+            })
+            .collect()
+    };
+
+    let mut derived: Vec<(f64, Vec<AsymptTerm>)> = Vec::new();
+    for (c1, w1) in &a.continuous {
+        let s_a = c1.support();
+        for (c2, w2) in &b.continuous {
+            let s_b = c2.support();
+            for s1 in c1.singularities() {
+                let f = reaching(s1, s_a);
+                for s2 in c2.singularities() {
+                    let g = reaching(s2, s_b);
+                    let mut terms = Vec::new();
+                    for &t1 in &f {
+                        for &t2 in &g {
+                            terms.extend(convolve_terms(t1, t2, w1 * w2));
+                        }
+                    }
+                    merge(&mut derived, s1.position + s2.position, terms);
+                }
+            }
+        }
+    }
+    derived
+}
+
 /// Singular structure of $C_A \ast C_B$.
 ///
 /// $\int C_1(\nu) C_2(\omega-\nu) d\nu$ stops being smooth in $\omega$ where both
 /// factors stop being smooth at one and the same $\nu$, that is where $\nu = \Omega_1$
-/// and $\omega - \nu = \Omega_2$ hold together. The positions are therefore the
-/// pairwise sums.
+/// and $\omega - \nu = \Omega_2$ hold together. The positions are therefore the pairwise
+/// sums, and the ends of a support count: that is where a factor stops contributing.
 ///
-/// Every position carries an empty singularity for now, which says where the
+/// A position where no pair of singular parts met carries no terms. It says where the
 /// interpolation must start a fresh panel and nothing more.
 pub fn singularities(a: &SpectralFunction, b: &SpectralFunction) -> Vec<Singularity> {
-    let reach = support(a, b);
     let mut positions: Vec<f64> = Vec::new();
     for (c1, _) in &a.continuous {
         for (c2, _) in &b.continuous {
@@ -418,12 +629,19 @@ pub fn singularities(a: &SpectralFunction, b: &SpectralFunction) -> Vec<Singular
             }
         }
     }
-    positions.retain(|p| reach.strictly_contains(*p));
     positions.sort_unstable_by(f64::total_cmp);
     positions.dedup();
+
+    let mut derived = derived_terms(a, b);
     positions
         .into_iter()
-        .map(|p| Singularity::new(p, 1.0, Vec::new()))
+        .map(|position| {
+            let terms = match derived.iter_mut().find(|(p, _)| *p == position) {
+                Some((_, terms)) => std::mem::take(terms),
+                None => Vec::new(),
+            };
+            Singularity::new(position, 1.0, terms)
+        })
         .collect()
 }
 
@@ -472,6 +690,74 @@ mod tests {
             }
         }
         assert!(checked >= 20, "only {checked} pairs were reached");
+    }
+
+    /// The van Hove logarithm of the square lattice, which nothing in the library is
+    /// told: it falls out of two inverse square roots meeting at $r = 0$.
+    #[test]
+    fn the_square_lattice_logarithm_is_derived() {
+        let t = 1.0f64;
+        let derived = singularities(&chain(0.0, t), &chain(0.0, t));
+        let centre = derived.iter().find(|s| s.position == 0.0).unwrap();
+        let slope = (centre.value(1e-8) - centre.value(1e-4)) / (1e-8f64.ln() - 1e-4f64.ln());
+        assert_relative_eq!(
+            slope,
+            -1.0 / (2.0 * std::f64::consts::PI.powi(2) * t),
+            max_relative = 1e-11
+        );
+
+        // The band edges meet at r = 0 too, where the term left over is a constant,
+        // analytic and no part of the singular structure
+        for position in [-4.0f64, 4.0] {
+            let edge = derived.iter().find(|s| s.position == position).unwrap();
+            assert!(edge.is_trivial());
+        }
+    }
+
+    /// What the derivation reaches, end to end: the interpolated result has to fit.
+    #[test]
+    fn the_regular_part_is_smooth_enough_to_fit() {
+        use crate::interp::InterpolatedSF;
+        let cases = [
+            // A chain against itself pairs two genuine singularities at every point
+            (
+                "chain against chain",
+                chain(0.0, 1.0),
+                chain(0.0, 1.0),
+                1e-12f64,
+            ),
+            // Two boxes have no singular parts at all, and their triangle is fitted
+            // exactly because a kink at a panel boundary is a polynomial either side
+            (
+                "box against box",
+                flat(0.0, 1.5, 0.0),
+                flat(0.0, 1.5, 0.0),
+                1e-13,
+            ),
+            // A band edge where one factor merely stops is not derived, and the square
+            // root left behind is what the fit has to work at
+            (
+                "chain against square",
+                chain(0.0, 1.0),
+                square(0.0, 1.0),
+                1e-7,
+            ),
+        ];
+        for (name, a, b, want) in cases {
+            let derived = singularities(&a, &b);
+            let tol = 1e-12;
+            let regular = |omega: f64| {
+                let singular: f64 = derived.iter().map(|s| s.value(omega)).sum();
+                value(&a, &b, omega, tol) - singular
+            };
+            let reach = support(&a, &b);
+            let fitted = InterpolatedSF::from_parts(reach, derived.clone(), regular, Some(tol));
+            assert!(
+                fitted.fit_error() < want,
+                "{name} fitted to {:.2e}, wanted better than {want:.0e}",
+                fitted.fit_error()
+            );
+        }
     }
 
     /// Two boxes convolve into a triangle, which is worth knowing exactly.
