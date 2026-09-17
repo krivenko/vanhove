@@ -72,9 +72,21 @@ impl Part<'_> {
     }
 
     /// $\int S$ over a stretch of the $\nu$ axis, in closed form.
+    ///
+    /// The stretch has to be carried into the singularity's own variable, and for a
+    /// reflected one its ends are measured off $\Omega_q$ rather than mirrored. The
+    /// singular point sits at $\omega - \Omega_q$ along the $\nu$ axis, so mirroring that
+    /// back returns $\Omega_q$ only to within rounding, and an end may land the wrong
+    /// side of the very point it is there to enclose.
     fn integral(&self, segment: Segment) -> f64 {
         let own = match self.reflected {
-            Some(omega) => segment.mirrored(omega),
+            Some(_) => {
+                let point = self.at();
+                Segment::new(
+                    self.sing.position - (segment.max() - point),
+                    self.sing.position + (point - segment.min()),
+                )
+            }
             None => segment,
         };
         match own.intersection(self.support) {

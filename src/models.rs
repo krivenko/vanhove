@@ -1696,6 +1696,79 @@ mod tests {
         }
     }
 
+    /// Every model with a bounded support convolves, whatever it carries: a flat band
+    /// as a resonance, a Dirac point, a band touching, a divergence at an edge.
+    #[test]
+    fn every_bounded_model_convolves() {
+        let cases: [(&str, SpectralFunction, SpectralFunction); 8] = [
+            (
+                "honeycomb",
+                super::honeycomb(0.0, 1.0),
+                super::chain(0.0, 1.0),
+            ),
+            ("kagome", super::kagome(0.0, 1.0), super::chain(0.0, 1.0)),
+            ("lieb", super::lieb(0.0, 1.0), super::chain(0.0, 1.0)),
+            ("bethe", super::bethe(3, 0.0, 1.0), super::chain(0.0, 1.0)),
+            (
+                "pseudogap",
+                super::pseudogap(0.0, 1.0, 1.0),
+                super::chain(0.0, 1.0),
+            ),
+            (
+                "powerlaw",
+                super::powerlaw(0.0, -0.5, 1.0),
+                super::chain(0.0, 1.0),
+            ),
+            (
+                "triangular against square",
+                super::triangular(0.0, 1.0),
+                super::square(0.0, 1.0),
+            ),
+            (
+                "honeycomb against itself",
+                super::honeycomb(0.0, 1.0),
+                super::honeycomb(0.0, 1.0),
+            ),
+        ];
+        for (name, a, b) in cases {
+            let c = a.conv(&b, Some(1e-11));
+            let weight = a.total_weight() * b.total_weight();
+            assert_relative_eq!(c.total_weight(), weight, max_relative = 1e-9);
+            assert_relative_eq!(
+                c.integrate(|_| 1.0, None).unwrap(),
+                weight,
+                max_relative = 1e-7,
+            );
+            // The first moment adds, which no amount of structure should disturb
+            let mean = |sf: &SpectralFunction| sf.integrate(|w: f64| w, None).unwrap();
+            assert_relative_eq!(
+                mean(&c),
+                mean(&a) * b.total_weight() + a.total_weight() * mean(&b),
+                max_relative = 1e-7,
+                epsilon = 1e-9,
+            );
+            // A divergence is a legitimate answer — a resonance of one operand carries
+            // the band edge of the other onto some frequency, and kagome's flat band
+            // puts a chain's inverse square root exactly at the origin. What must not
+            // appear is a value that is no number at all.
+            let reach = c.support().unwrap();
+            for i in 0..=200 {
+                let omega = reach.min() + reach.length() * f64::from(i) / 200.0;
+                assert!(
+                    !c.continuous_at(omega).is_nan(),
+                    "{name} left no number at all at {omega}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "bounded supports")]
+    fn conv_needs_a_bounded_support() {
+        // A Gaussian reaches everywhere, and there is no panel to lay over that
+        let _ = super::gaussian(0.0, 0.5).conv(&super::chain(0.0, 1.0), None);
+    }
+
     #[test]
     fn simple_cubic_dos() {
         let (eps, t) = (0.3f64, 1.4f64);
