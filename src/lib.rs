@@ -2,6 +2,7 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+mod conv;
 pub mod discrete;
 mod interp;
 pub mod models;
@@ -225,13 +226,29 @@ impl SpectralFunction {
 
     /// Convolution with another spectral function,
     /// $\int A(\nu) B(\omega - \nu) d\nu$.
-    pub fn conv(&self, other: &SpectralFunction) -> SpectralFunction {
-        assert!(
-            self.continuous.is_empty() || other.continuous.is_empty(),
-            "convolution of two continuous spectral functions is not supported yet"
-        );
+    pub fn conv(&self, other: &SpectralFunction, tol: Option<f64>) -> SpectralFunction {
+        // Every resonance of one operand against the continuous part of the other
         let mut continuous = conv_discrete_continuous(&self.discrete, other);
         continuous.extend(conv_discrete_continuous(&other.discrete, self));
+
+        // The two continuous parts against each other, taken contribution by
+        // contribution and interpolated over the singular structure of the result
+        if !self.continuous.is_empty() && !other.continuous.is_empty() {
+            let tol = tol.unwrap_or(InterpolatedSF::DEFAULT_TOL);
+            let singularities = conv::singularities(self, other);
+            let regular = |omega: f64| {
+                let singular: f64 = singularities.iter().map(|s| s.value(omega)).sum();
+                conv::value(self, other, omega, tol) - singular
+            };
+            let interpolated = InterpolatedSF::from_parts(
+                conv::support(self, other),
+                singularities.clone(),
+                regular,
+                Some(tol),
+            );
+            continuous.push((Arc::new(interpolated) as Arc<dyn ContinuousSF>, 1.0));
+        }
+
         SpectralFunction::from_discrete_continuous(self.discrete.conv(&other.discrete), continuous)
     }
 
@@ -714,7 +731,7 @@ mod tests {
     #[test]
     fn conv_discrete_continuous() {
         // A unit resonance displaces a band to its position
-        let shifted = discrete(&[1.5], &[1.0]).conv(&semicircle(0.0, 2.0));
+        let shifted = discrete(&[1.5], &[1.0]).conv(&semicircle(0.0, 2.0), None);
         let reference = semicircle(1.5, 2.0);
         assert_eq!(shifted.support(), reference.support());
         for omega in [-0.5, 0.4, 1.5, 2.6, 3.5] {
@@ -726,14 +743,14 @@ mod tests {
         }
 
         // Singular points travel with the band
-        let shifted = discrete(&[2.0], &[1.0]).conv(&square(0.0, 1.0));
+        let shifted = discrete(&[2.0], &[1.0]).conv(&square(0.0, 1.0), None);
         assert_eq!(shifted.continuous_at(2.0), f64::INFINITY);
         assert_eq!(shifted.support(), Some(Segment::new(-2.0, 6.0)));
 
         // Weight is multiplicative, and the operands need not be normalized
         let a = 0.5 * discrete(&[-1.0, 2.0], &[0.25, 0.75]);
         let b = 3.0 * chain(0.0, 1.0);
-        let c = a.conv(&b);
+        let c = a.conv(&b, None);
         assert_relative_eq!(
             c.total_weight(),
             a.total_weight() * b.total_weight(),
@@ -748,7 +765,7 @@ mod tests {
         for omega in [-2.5, 0.0, 1.3, 3.5] {
             assert_relative_eq!(
                 c.continuous_at(omega),
-                b.conv(&a).continuous_at(omega),
+                b.conv(&a, None).continuous_at(omega),
                 max_relative = 1e-14
             );
         }
@@ -791,7 +808,7 @@ mod tests {
             square(0.5, 1.0).precomputed(None),
         ];
         for dos in models {
-            let moved = unit.conv(&dos);
+            let moved = unit.conv(&dos, None);
             let support = dos.support().unwrap();
             let (lo, hi) = (support.min().max(-20.0), support.max().min(20.0));
             for i in 0..=40 {
@@ -808,9 +825,12 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "two continuous spectral functions")]
     fn conv_two_continuous() {
-        let _ = chain(0.0, 1.0).conv(&square(0.0, 1.0));
+        // Two continuous parts convolve into one interpolated contribution carrying
+        // the whole spectral weight between them
+        let c = chain(0.0, 1.0).conv(&square(0.0, 1.0), None);
+        assert_relative_eq!(c.total_weight(), 1.0, max_relative = 1e-9);
+        assert!(c.discrete().is_empty());
     }
 
     #[test]

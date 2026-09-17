@@ -81,7 +81,7 @@ pub struct InterpolatedSF {
 
 impl InterpolatedSF {
     /// Default relative tolerance of the fit.
-    const DEFAULT_TOL: f64 = 1e-12;
+    pub(crate) const DEFAULT_TOL: f64 = 1e-12;
 
     /// Interpolate the regular part of `csf`.
     ///
@@ -90,7 +90,26 @@ impl InterpolatedSF {
     /// the fit actually achieved: a regular part that is not smooth at an end of a
     /// panel converges too slowly to reach any tolerance worth asking for.
     pub fn new(csf: &dyn ContinuousSF, tol: Option<f64>) -> InterpolatedSF {
-        let support = csf.support();
+        InterpolatedSF::from_parts(
+            csf.support(),
+            csf.singularities().into(),
+            |omega| csf.regular(omega),
+            tol,
+        )
+    }
+
+    /// Interpolate a regular part handed over on its own, along with the support and
+    /// the singular structure it belongs to.
+    ///
+    /// `regular` is sampled strictly between consecutive singular points, never at one,
+    /// and carries whatever `singularities` describes already subtracted. That matters
+    /// where both diverge: their difference has a limit but no value at the point.
+    pub fn from_parts<F: Fn(f64) -> f64>(
+        support: Segment,
+        singularities: Vec<Singularity>,
+        regular: F,
+        tol: Option<f64>,
+    ) -> InterpolatedSF {
         assert!(
             support.is_bounded(),
             "an interpolated spectral function must have a bounded support"
@@ -104,8 +123,7 @@ impl InterpolatedSF {
 
         // Panel boundaries: the ends of the support, and the singular points between
         // them, which is every frequency where R(ω) stops being smooth
-        let mut breaks: Vec<f64> = csf
-            .singularities()
+        let mut breaks: Vec<f64> = singularities
             .iter()
             .map(|s| s.position)
             .filter(|&p| support.strictly_contains(p))
@@ -119,9 +137,9 @@ impl InterpolatedSF {
             support,
             panels: breaks
                 .windows(2)
-                .map(|lr| Panel::fit(Segment::new(lr[0], lr[1]), &|omega| csf.regular(omega), tol))
+                .map(|lr| Panel::fit(Segment::new(lr[0], lr[1]), &regular, tol))
                 .collect(),
-            singularities: csf.singularities().into(),
+            singularities: singularities.into_boxed_slice(),
         }
     }
 
