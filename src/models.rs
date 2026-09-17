@@ -974,6 +974,37 @@ pub fn lieb(eps: f64, t: f64) -> SpectralFunction {
     )
 }
 
+//
+// Simple cubic lattice DOS
+//
+
+/// Returns normalized density of states of a simple cubic lattice.
+///
+/// The simple cubic lattice is defined by the hopping constant `t` and the local energy
+/// level `eps`, with the dispersion law
+/// $\varepsilon(k) = \epsilon - 2t[\cos(k_x) + \cos(k_y) + \cos(k_z)]$. It has no closed
+/// form, but the dispersion is a sum of three independent one-dimensional bands, so the
+/// density of states is a convolution:
+/// $$
+///     A_{\mathrm{sc}} = A_{\mathrm{chain}} \ast A_{\mathrm{square}},
+/// $$
+/// the square lattice being itself two chains. The band runs from $\epsilon - 6t$ to
+/// $\epsilon + 6t$, with band edges at $\pm 6t$ and van Hove saddles at $\pm 2t$.
+///
+/// Nothing of that structure is written down here. It is derived from the two operands
+/// by [`SpectralFunction::conv()`].
+///
+/// The values are the convolution itself and carry no approximation, but the asymptotics
+/// reported at the saddles is not the whole of the local form. Two pairs of features meet
+/// there — a chain band edge against the square lattice logarithm, and the other chain
+/// band edge against the square lattice band edge — and only the first is a pair of
+/// singular parts. The second has nothing singular on the square lattice side, so it is
+/// not derived, and what is left of it stays in the regular part.
+pub fn simple_cubic(eps: f64, t: f64) -> SpectralFunction {
+    assert!(t > 0.0, "hopping constant must be positive");
+    chain(eps, t).conv(&square(0.0, t), None)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1668,6 +1699,68 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn simple_cubic_dos() {
+        let (eps, t) = (0.3f64, 1.4f64);
+        let sc = simple_cubic(eps, t);
+
+        // Normalized, with no resonance, over a band three chains wide
+        assert_relative_eq!(sc.total_weight(), 1.0, max_relative = 1e-9);
+        assert!(sc.discrete().is_empty());
+        assert_relative_eq!(
+            sc.integrate(|_| 1.0, None).unwrap(),
+            1.0,
+            max_relative = 1e-8
+        );
+        for outside in [eps - 6.1 * t, eps + 6.1 * t] {
+            assert_eq!(sc.continuous_at(outside), 0.0);
+        }
+        assert!(sc.continuous_at(eps) > 0.0);
+
+        // Moments of the simple cubic band, none of which the library is told:
+        // 6t², 90t⁴ and 1860t⁶ about the band centre
+        for (order, known) in [(2i32, 6.0f64), (4, 90.0), (6, 1860.0)] {
+            let moment = sc
+                .integrate(|omega: f64| (omega - eps).powi(order), None)
+                .unwrap();
+            assert_relative_eq!(moment, known * t.powi(order), max_relative = 1e-7);
+        }
+    }
+
+    /// The saddles and band edges sit where the derivation says they do, whether or not
+    /// it has a coefficient for each.
+    #[test]
+    fn simple_cubic_van_hove_points() {
+        let t = 1.0f64;
+        let sc = simple_cubic(0.0, t);
+        let (csf, _) = &sc.continuous[0];
+        let positions: Vec<f64> = csf.singularities().iter().map(|s| s.position).collect();
+        assert_eq!(positions, vec![-6.0 * t, -2.0 * t, 2.0 * t, 6.0 * t]);
+
+        // The saddles carry a square root, which is why a three-dimensional van Hove
+        // point is a cusp and not the peak the square lattice has
+        for saddle in [-2.0 * t, 2.0 * t] {
+            let sing = csf
+                .singularities()
+                .iter()
+                .find(|s| s.position == saddle)
+                .unwrap();
+            assert!(!sing.is_trivial());
+            // The cusp faces the band centre and the other side is analytic, so the
+            // square root is read off whichever side carries it
+            let (near, far) = (1e-8f64, 1e-6f64);
+            let side = if saddle < 0.0 { -1.0 } else { 1.0 };
+            let ratio = sing.value(saddle + side * near) / sing.value(saddle + side * far);
+            assert_relative_eq!(ratio, (near / far).sqrt(), max_relative = 1e-6);
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "hopping constant must be positive")]
+    fn simple_cubic_zero_hopping() {
+        let _ = simple_cubic(0.0, 0.0);
     }
 
     #[test]
