@@ -11,11 +11,11 @@
 //! first needs no care at all, and the middle two need one subtraction each against a
 //! factor that is smooth by construction.
 
+use crate::ContinuousSF;
 use crate::beta::{beta_derivatives, incomplete_beta_derivatives, outer_stretch_logs};
 use crate::segment::Segment;
 use crate::singularity::{AsymptTerm, LocalTerm, Singularity};
 use crate::util::{bilby_integrate_or_0, binomials, is_natural};
-use crate::{ContinuousSF, SpectralFunction};
 
 /// Exponent above which a derived term is smooth enough to leave to the interpolation.
 ///
@@ -315,7 +315,7 @@ fn singular_singular_by_quadrature(first: &Part, second: &Part, segment: Segment
 }
 
 /// $\int C_1(\nu) C_2(\omega-\nu) d\nu$ over the overlap of the two supports.
-fn pair(c1: &dyn ContinuousSF, c2: &dyn ContinuousSF, omega: f64, tol: f64) -> f64 {
+pub fn pair_value(c1: &dyn ContinuousSF, c2: &dyn ContinuousSF, omega: f64, tol: f64) -> f64 {
     let (s1, s2) = (c1.support(), c2.support());
     let Some(overlap) = s1.intersection(s2.mirrored(omega)) else {
         return 0.0;
@@ -365,24 +365,9 @@ fn pair(c1: &dyn ContinuousSF, c2: &dyn ContinuousSF, omega: f64, tol: f64) -> f
     total
 }
 
-/// $(C_A \ast C_B)(\omega)$, summed over every pair of contributions.
-pub fn value(a: &SpectralFunction, b: &SpectralFunction, omega: f64, tol: f64) -> f64 {
-    let mut total = 0.0;
-    for (c1, w1) in &a.continuous {
-        for (c2, w2) in &b.continuous {
-            total += w1 * w2 * pair(c1.as_ref(), c2.as_ref(), omega, tol);
-        }
-    }
-    total
-}
-
-/// Support of $C_A \ast C_B$, which reaches as far as the two supports added together.
-pub fn support(a: &SpectralFunction, b: &SpectralFunction) -> Segment {
-    let ends = |sf: &SpectralFunction| {
-        Segment::hull(sf.continuous.iter().map(|(c, _)| c.support()))
-            .expect("a convolution needs a continuous contribution on either side")
-    };
-    let (x, y) = (ends(a), ends(b));
+/// Support of $C_1 \ast C_2$, which reaches as far as the two supports added together.
+pub fn pair_support(c1: &dyn ContinuousSF, c2: &dyn ContinuousSF) -> Segment {
+    let (x, y) = (c1.support(), c2.support());
     assert!(
         x.is_bounded() && y.is_bounded(),
         "convolution of continuous parts is restricted to bounded supports"
@@ -560,19 +545,24 @@ fn features(csf: &dyn ContinuousSF) -> Vec<f64> {
     out
 }
 
-/// Local form of $C_A \ast C_B$ wherever a singular part of one factor meets one of the
-/// other.
+/// Singular structure of $C_1 \ast C_2$.
 ///
-/// Only singular parts pair. A support end where nothing diverges leaves a kink going as
-/// $|\Delta|$ or milder, which is a polynomial either side of the panel boundary it sits
-/// on and is fitted there exactly, so there is nothing to gain by deriving it and a
-/// double count to be had by trying: two band edges of equal width would each claim the
-/// whole of it.
-fn derived_terms(a: &SpectralFunction, b: &SpectralFunction) -> Vec<(f64, Vec<AsymptTerm>)> {
+/// $\int C_1(\nu) C_2(\omega-\nu) d\nu$ stops being smooth in $\omega$ where both factors
+/// stop being smooth at one and the same $\nu$, that is where $\nu = \Omega_1$ and
+/// $\omega - \nu = \Omega_2$ hold together. The positions are therefore the pairwise sums,
+/// and the ends of a support count: that is where a factor stops contributing at all.
+///
+/// Only singular parts carry terms. A support end where nothing diverges leaves a kink
+/// going as $|\Delta|$ or milder, which is a polynomial either side of the panel
+/// boundary it sits on and is fitted there exactly, so there is nothing to gain by
+/// deriving it and a double count to be had by trying: two band edges of equal width
+/// would each claim the whole of it. Such a position enters with no terms, saying where
+/// the interpolation must start a fresh panel and nothing more.
+pub fn pair_singularities(c1: &dyn ContinuousSF, c2: &dyn ContinuousSF) -> Vec<Singularity> {
     // A singular part sitting at an end of the support has no side there. `local_form()`
     // does not know that — it reads the term as written, and a term written for both
-    // sides would otherwise have a band edge convolve as though the band continued
-    // through it, which is a factor of two at every van Hove point.
+    // sides would otherwise have a band edge convolve as though the band ran on through
+    // it, which is a factor of two at every van Hove point.
     let reaching = |sing: &Singularity, support: Segment| -> Vec<LocalTerm> {
         let below = sing.position > support.min();
         let above = sing.position < support.max();
@@ -586,53 +576,30 @@ fn derived_terms(a: &SpectralFunction, b: &SpectralFunction) -> Vec<(f64, Vec<As
             .collect()
     };
 
+    let (s1, s2) = (c1.support(), c2.support());
     let mut derived: Vec<(f64, Vec<AsymptTerm>)> = Vec::new();
-    for (c1, w1) in &a.continuous {
-        let s_a = c1.support();
-        for (c2, w2) in &b.continuous {
-            let s_b = c2.support();
-            for s1 in c1.singularities() {
-                let f = reaching(s1, s_a);
-                for s2 in c2.singularities() {
-                    let g = reaching(s2, s_b);
-                    let mut terms = Vec::new();
-                    for &t1 in &f {
-                        for &t2 in &g {
-                            terms.extend(convolve_terms(t1, t2, w1 * w2));
-                        }
-                    }
-                    merge(&mut derived, s1.position + s2.position, terms);
+    for sing1 in c1.singularities() {
+        let f = reaching(sing1, s1);
+        for sing2 in c2.singularities() {
+            let g = reaching(sing2, s2);
+            let mut terms = Vec::new();
+            for &t1 in &f {
+                for &t2 in &g {
+                    terms.extend(convolve_terms(t1, t2, 1.0));
                 }
             }
+            merge(&mut derived, sing1.position + sing2.position, terms);
         }
     }
-    derived
-}
 
-/// Singular structure of $C_A \ast C_B$.
-///
-/// $\int C_1(\nu) C_2(\omega-\nu) d\nu$ stops being smooth in $\omega$ where both
-/// factors stop being smooth at one and the same $\nu$, that is where $\nu = \Omega_1$
-/// and $\omega - \nu = \Omega_2$ hold together. The positions are therefore the pairwise
-/// sums, and the ends of a support count: that is where a factor stops contributing.
-///
-/// A position where no pair of singular parts met carries no terms. It says where the
-/// interpolation must start a fresh panel and nothing more.
-pub fn singularities(a: &SpectralFunction, b: &SpectralFunction) -> Vec<Singularity> {
     let mut positions: Vec<f64> = Vec::new();
-    for (c1, _) in &a.continuous {
-        for (c2, _) in &b.continuous {
-            for p1 in features(c1.as_ref()) {
-                for p2 in features(c2.as_ref()) {
-                    positions.push(p1 + p2);
-                }
-            }
+    for p1 in features(c1) {
+        for p2 in features(c2) {
+            positions.push(p1 + p2);
         }
     }
     positions.sort_unstable_by(f64::total_cmp);
     positions.dedup();
-
-    let mut derived = derived_terms(a, b);
     positions
         .into_iter()
         .map(|position| {
@@ -648,8 +615,14 @@ pub fn singularities(a: &SpectralFunction, b: &SpectralFunction) -> Vec<Singular
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::SpectralFunction;
     use crate::models::*;
     use approx::assert_relative_eq;
+
+    /// The one continuous contribution a model carries.
+    fn only(sf: &SpectralFunction) -> &dyn ContinuousSF {
+        sf.continuous[0].0.as_ref()
+    }
 
     /// The closed form and the quadrature it replaces, on every pair of singular parts
     /// a chain and a square lattice have between them.
@@ -697,7 +670,8 @@ mod tests {
     #[test]
     fn the_square_lattice_logarithm_is_derived() {
         let t = 1.0f64;
-        let derived = singularities(&chain(0.0, t), &chain(0.0, t));
+        let (a, b) = (chain(0.0, t), chain(0.0, t));
+        let derived = pair_singularities(only(&a), only(&b));
         let centre = derived.iter().find(|s| s.position == 0.0).unwrap();
         let slope = (centre.value(1e-8) - centre.value(1e-4)) / (1e-8f64.ln() - 1e-4f64.ln());
         assert_relative_eq!(
@@ -744,13 +718,13 @@ mod tests {
             ),
         ];
         for (name, a, b, want) in cases {
-            let derived = singularities(&a, &b);
+            let derived = pair_singularities(only(&a), only(&b));
             let tol = 1e-12;
             let regular = |omega: f64| {
                 let singular: f64 = derived.iter().map(|s| s.value(omega)).sum();
-                value(&a, &b, omega, tol) - singular
+                pair_value(only(&a), only(&b), omega, tol) - singular
             };
-            let reach = support(&a, &b);
+            let reach = pair_support(only(&a), only(&b));
             let fitted = InterpolatedSF::from_parts(reach, derived.clone(), regular, Some(tol));
             assert!(
                 fitted.fit_error() < want,
@@ -768,7 +742,11 @@ mod tests {
         let triangle = |w: f64| (2.0 * d - w.abs()).max(0.0) / (4.0 * d * d);
         for i in 0..=40 {
             let w = -2.0 * d + 4.0 * d * (i as f64) / 40.0;
-            assert_relative_eq!(value(&a, &b, w, tol), triangle(w), epsilon = 1e-12);
+            assert_relative_eq!(
+                pair_value(only(&a), only(&b), w, tol),
+                triangle(w),
+                epsilon = 1e-12
+            );
         }
     }
 
@@ -780,7 +758,7 @@ mod tests {
         let reference = square(0.0, t);
         for w in [-3.9f64, -2.5, -1.0, -0.3, 0.3, 1.0, 2.5, 3.9] {
             assert_relative_eq!(
-                value(&a, &b, w, 1e-12),
+                pair_value(only(&a), only(&b), w, 1e-12),
                 reference.continuous_at(w),
                 max_relative = 1e-12
             );
@@ -793,13 +771,13 @@ mod tests {
     #[test]
     fn colliding_points_diverge() {
         let (a, b) = (chain(0.0, 1.0), chain(0.0, 1.0));
-        assert_eq!(value(&a, &b, 0.0, 1e-12), f64::INFINITY);
+        assert_eq!(pair_value(only(&a), only(&b), 0.0, 1e-12), f64::INFINITY);
         assert_eq!(square(0.0, 1.0).continuous_at(0.0), f64::INFINITY);
 
         // Either side of it the value is finite and right
         for w in [-1e-6f64, 1e-6] {
             assert_relative_eq!(
-                value(&a, &b, w, 1e-12),
+                pair_value(only(&a), only(&b), w, 1e-12),
                 square(0.0, 1.0).continuous_at(w),
                 max_relative = 1e-9
             );
@@ -807,17 +785,17 @@ mod tests {
 
         // Two boxes have no singular parts to collide, so their band centre is finite
         let flat_pair = flat(0.0, 1.5, 0.0);
-        assert!(value(&flat_pair, &flat_pair, 0.0, 1e-12).is_finite());
+        assert!(pair_value(only(&flat_pair), only(&flat_pair), 0.0, 1e-12).is_finite());
     }
 
     /// The support adds, and the convolution vanishes beyond it.
     #[test]
     fn support_adds() {
         let (a, b) = (chain(0.0, 1.0), flat(0.5, 1.0, 0.0));
-        let reach = support(&a, &b);
+        let reach = pair_support(only(&a), only(&b));
         assert_relative_eq!(reach.min(), -2.5);
         assert_relative_eq!(reach.max(), 3.5);
-        assert_eq!(value(&a, &b, 4.0, 1e-10), 0.0);
-        assert_eq!(value(&a, &b, -3.0, 1e-10), 0.0);
+        assert_eq!(pair_value(only(&a), only(&b), 4.0, 1e-10), 0.0);
+        assert_eq!(pair_value(only(&a), only(&b), -3.0, 1e-10), 0.0);
     }
 }
