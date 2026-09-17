@@ -7,7 +7,7 @@
 
 use special::Gamma;
 
-use crate::util::{binomials, is_natural, polygamma};
+use crate::util::{binomials, polygamma};
 
 /// Derivatives of $\Gamma$ at `x`, up to order `n`.
 ///
@@ -452,6 +452,14 @@ pub fn incomplete_beta_derivatives(
     );
     assert!((0.0..=1.0).contains(&z), "the argument must lie in [0, 1]");
     const TOL: f64 = 1e-17;
+    /// How near a non-positive integer `b` is read as sitting on it.
+    ///
+    /// The generic reflection subtracts two halves that each grow as $1/\epsilon$ there,
+    /// and loses digits to it long before $\epsilon$ reaches zero — five of them at
+    /// $\epsilon = 10^{-12}$. The pole branch has no such cancellation but answers for
+    /// the integer itself, which costs $O(\epsilon)$ and no more. The two are worth the
+    /// same here, and the worst either does is a part in $10^{8}$.
+    const POLE_WIDTH: f64 = 5e-9;
 
     if z <= 0.5 {
         return series(a, b, z, j_max, k_max, TOL);
@@ -463,8 +471,9 @@ pub fn incomplete_beta_derivatives(
     // is not: Γ(b) has a pole, and so does the one term of the series whose denominator
     // b+n vanishes. Carrying each as a Laurent series in ε about b = -m keeps the two
     // poles until they meet.
-    if is_natural(-b) {
-        let m = (-b) as usize;
+    let nearest = (-b).round();
+    if nearest >= 0.0 && (-b - nearest).abs() < POLE_WIDTH {
+        let m = nearest as usize;
         let width = j_max + k_max + 3;
         let complete = complete_at_pole(a, m, j_max, k_max, width);
         let reflected = series_at_pole(m, a, 1.0 - z, k_max, j_max, width, TOL);
@@ -628,6 +637,25 @@ mod tests {
                         let want = by_quadrature(a, b, z, j, k);
                         assert_relative_eq!(got, want, max_relative = 1e-11, epsilon = 1e-13);
                     }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn near_a_pole() {
+        // Neither branch is comfortable just off a non-positive integer: the generic
+        // one cancels two halves that are each growing without bound, and the pole one
+        // answers a question about the integer rather than the argument given. Between
+        // them they have to stay honest anyway.
+        let (a, z) = (0.5f64, 0.9f64);
+        for eps in [1e-12f64, 1e-10, 1e-9, 5e-9, 1e-8, 1e-7, 1e-6, 1e-4] {
+            for side in [1.0f64, -1.0] {
+                for m in [0.0f64, 1.0, 2.0] {
+                    let b = -m + side * eps;
+                    let got = incomplete_beta_derivatives(a, b, z, 0, 0)[0][0];
+                    let want = by_quadrature(a, b, z, 0, 0);
+                    assert_relative_eq!(got, want, max_relative = 1e-7);
                 }
             }
         }
