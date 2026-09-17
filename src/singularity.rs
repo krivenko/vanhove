@@ -120,6 +120,25 @@ impl Strength {
     }
 }
 
+/// One term of a singular part written out in the distance to $\Omega_p$ itself,
+/// $c^\pm |\omega-\Omega_p|^r \ln^m|\omega-\Omega_p|$.
+///
+/// It is an [`AsymptTerm`] with the scale folded in, which [`Singularity::local_form()`]
+/// does and which costs a term per logarithm. Convolution works in this form: the two
+/// factors of a pair carry scales of their own, and nothing may be added across them
+/// until both are written against the same distance.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct LocalTerm {
+    /// Exponent $r$.
+    pub(crate) exponent: f64,
+    /// Power $m$ of the logarithmic factor.
+    pub(crate) log_power: u8,
+    /// Coefficient below $\Omega_p$.
+    pub(crate) c_below: f64,
+    /// Coefficient at and above $\Omega_p$.
+    pub(crate) c_above: f64,
+}
+
 /// Isolated integrable singularity of a continuous spectral function.
 ///
 /// The singular part is given in closed form over the whole support as
@@ -151,6 +170,35 @@ impl Singularity {
             scale,
             terms: terms.into_boxed_slice(),
         }
+    }
+
+    /// $S_p$ written out in $|\omega-\Omega_p|$ rather than in the scaled distance $u$.
+    ///
+    /// Folding the scale in costs terms: with $\ln u = \ln|\omega-\Omega_p| - \ln s$,
+    /// $$
+    ///     c u^r \ln^m u = c s^{-r} \sum_j \binom{m}{j} (-\ln s)^j
+    ///         |\omega-\Omega_p|^r \ln^{m-j}|\omega-\Omega_p|,
+    /// $$
+    /// so one term with $m$ logarithms leaves $m+1$ behind.
+    pub(crate) fn local_form(&self) -> Vec<LocalTerm> {
+        let ln_scale = self.scale.ln();
+        let mut form = Vec::with_capacity(self.terms.len());
+        for t in &self.terms {
+            let f = self.scale.powf(-t.exponent);
+            let m = i32::from(t.log_power);
+            let mut binomial = 1.0;
+            for j in 0..=m {
+                let w = f * binomial * (-ln_scale).powi(j);
+                form.push(LocalTerm {
+                    exponent: t.exponent,
+                    log_power: (m - j) as u8,
+                    c_below: t.c_below * w,
+                    c_above: t.c_above * w,
+                });
+                binomial *= f64::from(m - j) / f64::from(j + 1);
+            }
+        }
+        form
     }
 
     /// Whether $S_p$ vanishes identically and can be skipped altogether.

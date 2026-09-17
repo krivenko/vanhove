@@ -11,9 +11,10 @@
 //! first needs no care at all, and the middle two need one subtraction each against a
 //! factor that is smooth by construction.
 
+use crate::beta::incomplete_beta_derivatives;
 use crate::segment::Segment;
-use crate::singularity::Singularity;
-use crate::util::bilby_integrate_or_0;
+use crate::singularity::{LocalTerm, Singularity};
+use crate::util::{bilby_integrate_or_0, binomials};
 use crate::{ContinuousSF, SpectralFunction};
 
 /// Regular part of a contribution, zero where it does not reach.
@@ -107,13 +108,185 @@ fn subtracted<G: Fn(f64) -> f64>(part: &Part, g: G, segment: Segment, tol: f64) 
     bounded + anchor * part.integral(segment)
 }
 
-/// $\int S_p(\nu) S_q(\omega-\nu) d\nu$ over `segment`.
+/// $\int_{s_1}^{s_2} s^{r_1}\ln^{m_1}\\!s\;(\Delta+s)^{r_2}\ln^{m_2}\\!(\Delta+s)\\,ds$,
+/// for $\Delta > 0$ and $0 \le s_1 \le s_2$.
 ///
-/// Each divergence is given a stretch of its own, the two meeting halfway between them,
-/// and is subtracted there against the other factor. Where the two points coincide there
-/// is no such split to make and no finite anchor to take: the integrand then goes as
-/// $|\nu - \Omega|^{r_1 + r_2}$ and the integral itself need not converge.
-fn singular_singular(first: &Part, second: &Part, segment: Segment, tol: f64) -> f64 {
+/// This is an outer stretch, the one running away from the pair of singular points
+/// rather than between them. Scaling by $s = \Delta u$ and then $u = t/(1-t)$ turns it
+/// into an incomplete Beta with
+/// $$
+///     a = r_1 + 1 > 0, \qquad b = -\rho, \qquad z = \frac{s}{\Delta+s},
+/// $$
+/// where $\rho = r_1 + r_2 + 1$. The logarithms come out of the same substitutions:
+/// $\ln s = \ln\Delta + \ln t - \ln(1-t)$ and $\ln(\Delta+s) = \ln\Delta - \ln(1-t)$, so
+/// expanding both binomially leaves nothing but entries of the derivative table.
+fn outer_stretch(r1: f64, m1: usize, r2: f64, m2: usize, delta: f64, s1: f64, s2: f64) -> f64 {
+    let rho = r1 + r2 + 1.0;
+    let (a, b) = (r1 + 1.0, -rho);
+    let z = |s: f64| s / (delta + s);
+    let degree = m1 + m2;
+    let upper = incomplete_beta_derivatives(a, b, z(s2), m1, degree);
+    let lower = incomplete_beta_derivatives(a, b, z(s1), m1, degree);
+
+    let ln_delta = delta.ln();
+    let (rows1, rows2) = (binomials(m1), binomials(m2));
+    let mut total = 0.0;
+    for (i, &outer1) in rows1.iter().enumerate() {
+        let inner_row = binomials(i);
+        for (l, &outer2) in rows2.iter().enumerate() {
+            let mut inner = 0.0;
+            for (v, &weight) in inner_row.iter().enumerate() {
+                let sign = if (v + l).is_multiple_of(2) { 1.0 } else { -1.0 };
+                inner += weight * sign * (upper[i - v][v + l] - lower[i - v][v + l]);
+            }
+            total += outer1 * outer2 * ln_delta.powi((degree - i - l) as i32) * inner;
+        }
+    }
+    delta.powf(rho) * total
+}
+
+/// $\int_{x_1}^{x_2} x^{r_1}\ln^{m_1}\\!x\;(\Delta-x)^{r_2}\ln^{m_2}\\!(\Delta-x)\\,dx$,
+/// for $\Delta > 0$ and $0 \le x_1 \le x_2 \le \Delta$.
+///
+/// The stretch between the two singular points. Here $x = \Delta t$ is the whole
+/// substitution, and the two exponents stay apart: $a = r_1+1$ and $b = r_2+1$ are both
+/// positive, so this is the one stretch whose Beta never meets a pole.
+fn middle_stretch(r1: f64, m1: usize, r2: f64, m2: usize, delta: f64, x1: f64, x2: f64) -> f64 {
+    let rho = r1 + r2 + 1.0;
+    let (a, b) = (r1 + 1.0, r2 + 1.0);
+    let degree = m1 + m2;
+    let upper = incomplete_beta_derivatives(a, b, x2 / delta, m1, m2);
+    let lower = incomplete_beta_derivatives(a, b, x1 / delta, m1, m2);
+
+    let ln_delta = delta.ln();
+    let (rows1, rows2) = (binomials(m1), binomials(m2));
+    let mut total = 0.0;
+    for (i, &outer1) in rows1.iter().enumerate() {
+        for (l, &outer2) in rows2.iter().enumerate() {
+            let step = upper[i][l] - lower[i][l];
+            total += outer1 * outer2 * ln_delta.powi((degree - i - l) as i32) * step;
+        }
+    }
+    delta.powf(rho) * total
+}
+
+/// What $\int S_p S_q$ comes to where the two singular points sit at the same $\nu$.
+///
+/// There is no stretch between them and no closed form to reach for. The integrand goes
+/// as $|x|^{r_1+r_2}$, so the integral diverges wherever a pair of terms brings that to
+/// $-1$ or below, and the sign is the one the strongest such pair carries. Anything
+/// weaker stays finite and is left to the quadrature.
+///
+/// The second factor is met at $-x$, so a side of it pairs with the opposite side of the
+/// first: above the point it is the first from above against the second from below.
+fn coincident(first: &Part, second: &Part, segment: Segment, point: f64) -> Option<f64> {
+    let (reaches_above, reaches_below) = (segment.max() > point, segment.min() < point);
+    let mut strongest = f64::INFINITY;
+    let mut weight = 0.0;
+    for t1 in &first.sing.local_form() {
+        for t2 in &second.sing.local_form() {
+            let order = t1.exponent + t2.exponent;
+            if order > -1.0 || order > strongest {
+                continue;
+            }
+            let mut c = 0.0;
+            if reaches_above {
+                c += t1.c_above * t2.c_below;
+            }
+            if reaches_below {
+                c += t1.c_below * t2.c_above;
+            }
+            if c == 0.0 {
+                continue;
+            }
+            if order < strongest {
+                strongest = order;
+                weight = c;
+            } else {
+                weight += c;
+            }
+        }
+    }
+    (weight != 0.0).then(|| f64::INFINITY * weight.signum())
+}
+
+/// $\int S_p(\nu) S_q(\omega-\nu) d\nu$ over `segment`, without a quadrature.
+///
+/// Measured from the first singular point, $x = \nu - \Omega_p$, the second factor is
+/// met at $\Delta - x$ where $\Delta$ is the distance between the two points along the
+/// integration axis. The integrand changes form where either factor turns, at $x = 0$
+/// and $x = \Delta$, so the range is cut there into at most three stretches and each is
+/// a Beta function.
+///
+/// A negative $\Delta$ is the same problem reflected: $x \mapsto -x$ carries it to a
+/// positive one with both factors' sides exchanged.
+///
+/// [`None`] where the two points coincide, which leaves no stretch between them and an
+/// integral that need not converge.
+fn singular_singular_closed(first: &Part, second: &Part, segment: Segment) -> Option<f64> {
+    let (p, q) = (first.at(), second.at());
+    let raw = q - p;
+    if !raw.is_finite() {
+        return None;
+    }
+    if raw == 0.0 {
+        return coincident(first, second, segment, p);
+    }
+
+    // Everything measured from the first singular point, then turned to face right
+    let (x_lo, x_hi) = (segment.min() - p, segment.max() - p);
+    let (delta, x_lo, x_hi, flipped) = if raw < 0.0 {
+        (-raw, -x_hi, -x_lo, true)
+    } else {
+        (raw, x_lo, x_hi, false)
+    };
+
+    let sided = |t: &LocalTerm| {
+        if flipped {
+            (t.c_above, t.c_below)
+        } else {
+            (t.c_below, t.c_above)
+        }
+    };
+
+    let mut total = 0.0;
+    for t1 in &first.sing.local_form() {
+        let (m1, r1) = (usize::from(t1.log_power), t1.exponent);
+        let (below1, above1) = sided(t1);
+        for t2 in &second.sing.local_form() {
+            let (m2, r2) = (usize::from(t2.log_power), t2.exponent);
+            let (below2, above2) = sided(t2);
+
+            // x below zero: the first factor is met from below, the second from above
+            let cut = x_hi.min(0.0);
+            if x_lo < cut && below1 != 0.0 && above2 != 0.0 {
+                total += below1 * above2 * outer_stretch(r1, m1, r2, m2, delta, -cut, -x_lo);
+            }
+            // between the two points, both factors met from above
+            let (lo, hi) = (x_lo.max(0.0), x_hi.min(delta));
+            if lo < hi && above1 != 0.0 && above2 != 0.0 {
+                total += above1 * above2 * middle_stretch(r1, m1, r2, m2, delta, lo, hi);
+            }
+            // past the second point: the first from above, the second from below
+            let cut = x_lo.max(delta);
+            if cut < x_hi && above1 != 0.0 && below2 != 0.0 {
+                total += above1
+                    * below2
+                    * outer_stretch(r2, m2, r1, m1, delta, cut - delta, x_hi - delta);
+            }
+        }
+    }
+    Some(total)
+}
+
+/// The same by quadrature, each divergence given a stretch of its own and subtracted
+/// there against the other factor.
+///
+/// Kept as the reference the closed form is checked against, and as what answers where
+/// the two points coincide: there is then no stretch between them to speak of, no finite
+/// anchor to take, and an integrand going as $|\nu-\Omega|^{r_1+r_2}$ whose integral need
+/// not converge at all.
+fn singular_singular_by_quadrature(first: &Part, second: &Part, segment: Segment, tol: f64) -> f64 {
     let (p, q) = (first.at(), second.at());
     let (inside_p, inside_q) = (segment.contains(p), segment.contains(q));
 
@@ -180,7 +353,8 @@ fn pair(c1: &dyn ContinuousSF, c2: &dyn ContinuousSF, omega: f64, tol: f64) -> f
     // S_p ⊛ S_q, the only term where two divergences can meet
     for first in &parts1 {
         for second in &parts2 {
-            total += singular_singular(first, second, overlap, tol);
+            total += singular_singular_closed(first, second, overlap)
+                .unwrap_or_else(|| singular_singular_by_quadrature(first, second, overlap, tol));
         }
     }
     total
@@ -259,6 +433,47 @@ mod tests {
     use crate::models::*;
     use approx::assert_relative_eq;
 
+    /// The closed form and the quadrature it replaces, on every pair of singular parts
+    /// a chain and a square lattice have between them.
+    #[test]
+    fn the_closed_form_agrees_with_quadrature() {
+        let (a, b) = (chain(0.0, 1.0), square(0.0, 1.0));
+        let (c1, _) = &a.continuous[0];
+        let (c2, _) = &b.continuous[0];
+        let (s1, s2) = (c1.support(), c2.support());
+        let mut checked = 0;
+        for omega in [-5.5f64, -4.5, -3.3, -1.7, -0.5, 0.7, 2.2, 3.5, 4.4, 5.5] {
+            let Some(overlap) = s1.intersection(s2.mirrored(omega)) else {
+                continue;
+            };
+            if overlap.is_degenerate() {
+                continue;
+            }
+            for sing1 in c1.singularities() {
+                for sing2 in c2.singularities() {
+                    let first = Part {
+                        sing: sing1,
+                        support: s1,
+                        reflected: None,
+                    };
+                    let second = Part {
+                        sing: sing2,
+                        support: s2,
+                        reflected: Some(omega),
+                    };
+                    let Some(closed) = singular_singular_closed(&first, &second, overlap) else {
+                        continue;
+                    };
+                    let quadrature =
+                        singular_singular_by_quadrature(&first, &second, overlap, 1e-13);
+                    assert_relative_eq!(closed, quadrature, max_relative = 1e-8, epsilon = 1e-12);
+                    checked += 1;
+                }
+            }
+        }
+        assert!(checked >= 20, "only {checked} pairs were reached");
+    }
+
     /// Two boxes convolve into a triangle, which is worth knowing exactly.
     #[test]
     fn two_boxes_make_a_triangle() {
@@ -284,6 +499,29 @@ mod tests {
                 max_relative = 1e-12
             );
         }
+    }
+
+    /// Where two singular points meet the value is not a number but an infinity, and
+    /// saying so is the point: two inverse square roots colliding is the van Hove peak
+    /// of the square lattice.
+    #[test]
+    fn colliding_points_diverge() {
+        let (a, b) = (chain(0.0, 1.0), chain(0.0, 1.0));
+        assert_eq!(value(&a, &b, 0.0, 1e-12), f64::INFINITY);
+        assert_eq!(square(0.0, 1.0).continuous_at(0.0), f64::INFINITY);
+
+        // Either side of it the value is finite and right
+        for w in [-1e-6f64, 1e-6] {
+            assert_relative_eq!(
+                value(&a, &b, w, 1e-12),
+                square(0.0, 1.0).continuous_at(w),
+                max_relative = 1e-9
+            );
+        }
+
+        // Two boxes have no singular parts to collide, so their band centre is finite
+        let flat_pair = flat(0.0, 1.5, 0.0);
+        assert!(value(&flat_pair, &flat_pair, 0.0, 1e-12).is_finite());
     }
 
     /// The support adds, and the convolution vanishes beyond it.

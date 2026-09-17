@@ -439,8 +439,6 @@ fn series_at_pole(
 /// $B_z(a,b) = B(a,b) - B_{1-z}(b,a)$ turns it into the same series in $1-z$ with the
 /// two parameters exchanged, which is the branch a convolution spends its time on: the
 /// argument approaches one exactly as the frequency approaches a singular point.
-// Taken up by the convolution of two singular parts, which is the next step
-#[allow(dead_code)]
 pub fn incomplete_beta_derivatives(
     a: f64,
     b: f64,
