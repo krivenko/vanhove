@@ -55,8 +55,8 @@ impl Part<'_> {
     /// Where the singular point sits in $\nu$.
     fn at(&self) -> f64 {
         match self.reflected {
-            Some(omega) => omega - self.sing.position,
-            None => self.sing.position,
+            Some(omega) => omega - self.sing.position(),
+            None => self.sing.position(),
         }
     }
 
@@ -83,8 +83,8 @@ impl Part<'_> {
             Some(_) => {
                 let point = self.at();
                 Segment::new(
-                    self.sing.position - (segment.max() - point),
-                    self.sing.position + (point - segment.min()),
+                    self.sing.position() - (segment.max() - point),
+                    self.sing.position() + (point - segment.min()),
                 )
             }
             None => segment,
@@ -549,7 +549,7 @@ fn merge(derived: &mut Vec<(f64, Vec<AsymptTerm>)>, position: f64, terms: Vec<As
 /// the ends of its support, where it stops contributing at all.
 fn features(csf: &dyn ContinuousSF) -> Vec<f64> {
     let support = csf.support();
-    let mut out: Vec<f64> = csf.singularities().iter().map(|s| s.position).collect();
+    let mut out: Vec<f64> = csf.singularities().iter().map(|s| s.position()).collect();
     out.push(support.min());
     out.push(support.max());
     out.sort_unstable_by(f64::total_cmp);
@@ -589,7 +589,7 @@ fn local_form_at(csf: &dyn ContinuousSF, position: f64) -> (Vec<LocalTerm>, Loca
     let mut singular = Vec::new();
     let mut constant = csf.regular(position);
     for sing in csf.singularities() {
-        if sing.position == position {
+        if sing.position() == position {
             singular.extend(
                 sing.local_form()
                     .into_iter()
@@ -714,7 +714,7 @@ mod tests {
         let t = 1.0f64;
         let (a, b) = (chain(0.0, t), chain(0.0, t));
         let derived = pair_singularities(only(&a), only(&b));
-        let centre = derived.iter().find(|s| s.position == 0.0).unwrap();
+        let centre = derived.iter().find(|s| s.position() == 0.0).unwrap();
         let slope = (centre.value(1e-8) - centre.value(1e-4)) / (1e-8f64.ln() - 1e-4f64.ln());
         assert_relative_eq!(
             slope,
@@ -725,7 +725,7 @@ mod tests {
         // The band edges meet at r = 0 too, where the term left over is a constant,
         // analytic and no part of the singular structure
         for position in [-4.0f64, 4.0] {
-            let edge = derived.iter().find(|s| s.position == position).unwrap();
+            let edge = derived.iter().find(|s| s.position() == position).unwrap();
             assert!(edge.is_trivial());
         }
     }

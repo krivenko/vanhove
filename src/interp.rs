@@ -125,7 +125,7 @@ impl InterpolatedSF {
         // them, which is every frequency where R(ω) stops being smooth
         let mut breaks: Vec<f64> = singularities
             .iter()
-            .map(|s| s.position)
+            .map(|s| s.position())
             .filter(|&p| support.strictly_contains(p))
             .collect();
         breaks.push(support.min());
@@ -148,7 +148,6 @@ impl InterpolatedSF {
     ///
     /// A value above the requested tolerance means the expansion was cut off before
     /// converging, and is an estimate of the relative error of $R(\omega)$.
-    #[allow(dead_code)]
     pub fn fit_error(&self) -> f64 {
         self.panels.iter().fold(0.0f64, |m, p| m.max(p.tail))
     }

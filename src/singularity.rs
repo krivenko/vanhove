@@ -95,7 +95,7 @@ impl AsymptTerm {
 /// $|\omega-\Omega_p|^r$ outgrows $|\omega-\Omega_p|^{r'}$ for $r < r'$, and a
 /// logarithmic factor breaks the tie between equal exponents.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Strength {
+pub(crate) struct Strength {
     exponent: f64,
     log_power: u8,
 }
@@ -107,7 +107,7 @@ impl Strength {
     }
 
     /// Order the strengths, a faster growing term comparing greater.
-    pub fn order(&self, other: &Strength) -> Ordering {
+    pub(crate) fn order(&self, other: &Strength) -> Ordering {
         other
             .exponent
             .total_cmp(&self.exponent)
@@ -146,7 +146,7 @@ pub(crate) struct LocalTerm {
 #[derive(Debug, Clone)]
 pub struct Singularity {
     /// Position of the singular point, $\Omega_p$.
-    pub position: f64,
+    position: f64,
     /// Length $s$ the distance to $\Omega_p$ is measured in.
     scale: f64,
     /// Terms of $S_p(\omega)$.
@@ -196,6 +196,11 @@ impl Singularity {
         form
     }
 
+    /// Position of the singular point, $\Omega_p$.
+    pub fn position(&self) -> f64 {
+        self.position
+    }
+
     /// Whether $S_p$ vanishes identically and can be skipped altogether.
     pub fn is_trivial(&self) -> bool {
         self.terms.is_empty()
@@ -213,7 +218,7 @@ impl Singularity {
     ///
     /// Diverges at $\Omega_p$ unless every term stays bounded there.
     pub fn value(&self, omega: f64) -> f64 {
-        let d = omega - self.position;
+        let d = omega - self.position();
         let u = d.abs() / self.scale;
         self.terms.iter().map(|t| t.value(d < 0.0, u)).sum()
     }
@@ -229,10 +234,10 @@ impl Singularity {
             "a spectral function with singularities must have a bounded support"
         );
         debug_assert!(
-            support.contains(self.position),
+            support.contains(self.position()),
             "Ω_p lies outside the support"
         );
-        let (lower, upper) = support.split_at(self.position);
+        let (lower, upper) = support.split_at(self.position());
         let (below, above) = (lower.length() / self.scale, upper.length() / self.scale);
         // The half-integrals are taken over u, and dω = s du restores the scale
         self.terms
@@ -246,7 +251,7 @@ impl Singularity {
     ///
     /// The constant terms survive as they stand and each logarithm leaves $-c\ln s$
     /// behind, the terms with $r > 0$ vanishing.
-    pub fn finite_limit(&self) -> f64 {
+    pub(crate) fn finite_limit(&self) -> f64 {
         let ln_scale = self.scale.ln();
         self.terms
             .iter()
@@ -263,7 +268,7 @@ impl Singularity {
 
     /// Divergent terms at $\Omega_p$, each with the coefficient of the $\pm\infty$
     /// it tends to.
-    pub fn divergences(&self) -> impl Iterator<Item = (Strength, f64)> + '_ {
+    pub(crate) fn divergences(&self) -> impl Iterator<Item = (Strength, f64)> + '_ {
         self.terms.iter().filter_map(|t| {
             let strength = t.strength();
             // c u^r tends to sign(c) ∞ for r < 0, while c ln u tends to -sign(c) ∞
@@ -372,7 +377,7 @@ mod tests {
         // S_p has no value at Ω_p, which the quadrature is free to sample
         let quad = bilby_integrate(
             |omega| {
-                if omega == sing.position {
+                if omega == sing.position() {
                     0.0
                 } else {
                     sing.value(omega)

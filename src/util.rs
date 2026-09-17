@@ -145,7 +145,6 @@ pub fn bilby_integrate<F: Fn(f64) -> f64>(
 
 /// The same, carrying back nothing where the quadrature refuses the request rather than
 /// an error to unwrap.
-#[allow(dead_code)]
 pub fn bilby_integrate_or_0<F: Fn(f64) -> f64>(f: F, segment: Segment, tol: f64) -> f64 {
     bilby_integrate(f, segment, tol).map_or(0.0, |r| r.value)
 }
