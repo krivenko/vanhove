@@ -2,6 +2,7 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+mod beta;
 pub mod discrete;
 mod interp;
 mod laurent;

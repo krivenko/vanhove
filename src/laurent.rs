@@ -4,8 +4,6 @@
 //! known to cancel and the finite part is what is wanted. Everything is truncated to a
 //! fixed window of powers, so a product loses whatever reaches past it.
 
-#![allow(dead_code)]
-
 use std::ops::{Add, AddAssign, Mul, Neg, Sub};
 
 /// Truncated Laurent series in $\epsilon$, holding the coefficients of $\epsilon^{-w}$
