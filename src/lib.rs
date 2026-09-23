@@ -4,6 +4,7 @@
 
 pub mod discrete;
 mod interp;
+mod laurent;
 pub mod models;
 pub mod segment;
 mod singularity;
