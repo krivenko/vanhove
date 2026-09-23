@@ -56,8 +56,13 @@ impl AsymptTerm {
     /// Value of the term at $u$, on the side of $\Omega_p$ given by `below`.
     fn value(&self, below: bool, u: f64) -> f64 {
         let c = if below { self.c_below } else { self.c_above };
+        // A term of no weight is nothing wherever it is read, $u^r$ diverging or not
+        if c == 0.0 {
+            return 0.0;
+        }
         let v = c * self.pow.eval(u);
-        if self.log_power == 0 {
+        // $u^r$ vanishing takes the term with it: no power of $\ln u$ outgrows it
+        if self.log_power == 0 || v == 0.0 {
             v
         } else {
             v * u.ln().powi(i32::from(self.log_power))
@@ -451,6 +456,35 @@ mod tests {
         );
         assert_eq!(sing.finite_limit(), 5.0);
         assert_eq!(sing.divergences().count(), 0);
+    }
+
+    #[test]
+    fn value_at_the_singular_point() {
+        // c u^r ln^m u is zero at Ω_p for r > 0, the power vanishing faster than any
+        // number of logarithms diverges. Taken literally it is 0 · (-∞)^m.
+        for m in 0u8..=3 {
+            let sing = Singularity::new(2.0, 1.0, vec![AsymptTerm::sided_log(0.5, m, 3.0, 5.0)]);
+            assert_eq!(sing.value(2.0), 0.0, "m = {m}");
+            assert!(sing.value(2.0 + 1e-300).abs() < 1e-140);
+        }
+
+        // A term of no weight is nothing at Ω_p however fast u^r diverges, where
+        // literally it is 0 · ∞
+        for r in [-0.5f64, 0.0, 0.5] {
+            for m in 0u8..=2 {
+                let sing = Singularity::new(0.0, 1.0, vec![AsymptTerm::sided_log(r, m, 0.0, 0.0)]);
+                assert_eq!(sing.value(0.0), 0.0, "r = {r}, m = {m}");
+            }
+        }
+
+        // What does survive at Ω_p still does: a constant as it stands, and anything
+        // divergent as an infinity
+        let constant = Singularity::new(0.0, 1.0, vec![AsymptTerm::power(0.0, 1.5)]);
+        assert_eq!(constant.value(0.0), 1.5);
+        let divergent = Singularity::new(0.0, 1.0, vec![AsymptTerm::power(-0.5, 2.0)]);
+        assert_eq!(divergent.value(0.0), f64::INFINITY);
+        let peak = Singularity::new(0.0, 1.0, vec![AsymptTerm::log(1.0)]);
+        assert_eq!(peak.value(0.0), f64::INFINITY);
     }
 
     #[test]
