@@ -974,6 +974,32 @@ pub fn lieb(eps: f64, t: f64) -> SpectralFunction {
     )
 }
 
+//
+// Simple cubic lattice DOS
+//
+
+/// Returns normalized density of states of a simple cubic lattice.
+///
+/// The simple cubic lattice is defined by the hopping constant `t` and the local energy
+/// level `eps`, with the dispersion law
+/// $\varepsilon(k) = \epsilon - 2t[\cos(k_x) + \cos(k_y) + \cos(k_z)]$. It has no closed
+/// form, but the dispersion is a sum of three independent one-dimensional bands, so the
+/// density of states is a convolution:
+/// $$
+///     A_{\mathrm{sc}} = A_{\mathrm{chain}} \ast A_{\mathrm{square}},
+/// $$
+/// the square lattice being itself two chains. The band runs from $\epsilon - 6t$ to
+/// $\epsilon + 6t$, with band edges at $\pm 6t$ and van Hove saddles at $\pm 2t$.
+///
+/// Nothing of that structure is written down here, not the positions and not the
+/// coefficients. It is derived from the two operands by [`SpectralFunction::conv()`],
+/// which finds $1/4\pi^2 t^{3/2}$ at the band edges and $-3/4\pi^2 t^{3/2}$ at the
+/// saddles to nine digits.
+pub fn simple_cubic(eps: f64, t: f64) -> SpectralFunction {
+    assert!(t > 0.0, "hopping constant must be positive");
+    chain(eps, t).conv(&square(0.0, t), None)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1668,6 +1694,170 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// Every model with a bounded support convolves, whatever it carries: a flat band
+    /// as a resonance, a Dirac point, a band touching, a divergence at an edge.
+    #[test]
+    fn every_bounded_model_convolves() {
+        let cases: [(&str, SpectralFunction, SpectralFunction); 8] = [
+            (
+                "honeycomb",
+                super::honeycomb(0.0, 1.0),
+                super::chain(0.0, 1.0),
+            ),
+            ("kagome", super::kagome(0.0, 1.0), super::chain(0.0, 1.0)),
+            ("lieb", super::lieb(0.0, 1.0), super::chain(0.0, 1.0)),
+            ("bethe", super::bethe(3, 0.0, 1.0), super::chain(0.0, 1.0)),
+            (
+                "pseudogap",
+                super::pseudogap(0.0, 1.0, 1.0),
+                super::chain(0.0, 1.0),
+            ),
+            (
+                "powerlaw",
+                super::powerlaw(0.0, -0.5, 1.0),
+                super::chain(0.0, 1.0),
+            ),
+            (
+                "triangular against square",
+                super::triangular(0.0, 1.0),
+                super::square(0.0, 1.0),
+            ),
+            (
+                "honeycomb against itself",
+                super::honeycomb(0.0, 1.0),
+                super::honeycomb(0.0, 1.0),
+            ),
+        ];
+        for (name, a, b) in cases {
+            let c = a.conv(&b, Some(1e-11));
+            let weight = a.total_weight() * b.total_weight();
+            assert_relative_eq!(c.total_weight(), weight, max_relative = 1e-9);
+            assert_relative_eq!(
+                c.integrate(|_| 1.0, None).unwrap(),
+                weight,
+                max_relative = 1e-7,
+            );
+            // The first moment adds, which no amount of structure should disturb
+            let mean = |sf: &SpectralFunction| sf.integrate(|w: f64| w, None).unwrap();
+            assert_relative_eq!(
+                mean(&c),
+                mean(&a) * b.total_weight() + a.total_weight() * mean(&b),
+                max_relative = 1e-7,
+                epsilon = 1e-9,
+            );
+            // A divergence is a legitimate answer - a resonance of one operand carries
+            // the band edge of the other onto some frequency, and kagome's flat band
+            // puts a chain's inverse square root exactly at the origin. What must not
+            // appear is a value that is no number at all.
+            let reach = c.support().unwrap();
+            for i in 0..=200 {
+                let omega = reach.min() + reach.length() * f64::from(i) / 200.0;
+                assert!(
+                    !c.continuous_at(omega).is_nan(),
+                    "{name} left no number at all at {omega}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "bounded supports")]
+    fn conv_needs_a_bounded_support() {
+        // A Gaussian reaches everywhere, and there is no panel to lay over that
+        let _ = super::gaussian(0.0, 0.5).conv(&super::chain(0.0, 1.0), None);
+    }
+
+    #[test]
+    fn simple_cubic_dos() {
+        let (eps, t) = (0.3f64, 1.4f64);
+        let sc = simple_cubic(eps, t);
+
+        // Normalized, with no resonance, over a band three chains wide
+        assert_relative_eq!(sc.total_weight(), 1.0, max_relative = 1e-9);
+        assert!(sc.discrete().is_empty());
+        assert_relative_eq!(
+            sc.integrate(|_| 1.0, None).unwrap(),
+            1.0,
+            max_relative = 1e-8
+        );
+        for outside in [eps - 6.1 * t, eps + 6.1 * t] {
+            assert_eq!(sc.continuous_at(outside), 0.0);
+        }
+        assert!(sc.continuous_at(eps) > 0.0);
+
+        // Moments of the simple cubic band, none of which the library is told:
+        // 6t², 90t⁴ and 1860t⁶ about the band centre
+        for (order, known) in [(2i32, 6.0f64), (4, 90.0), (6, 1860.0)] {
+            let moment = sc
+                .integrate(|omega: f64| (omega - eps).powi(order), None)
+                .unwrap();
+            assert_relative_eq!(moment, known * t.powi(order), max_relative = 1e-7);
+        }
+    }
+
+    /// The saddles and band edges sit where the derivation says they do, and carry the
+    /// coefficients the literature gives.
+    #[test]
+    fn simple_cubic_van_hove_points() {
+        let t = 1.0f64;
+        let sc = simple_cubic(0.0, t);
+        let (csf, _) = &sc.continuous[0];
+        let positions: Vec<f64> = csf.singularities().iter().map(|s| s.position()).collect();
+        assert_eq!(positions, vec![-6.0 * t, -2.0 * t, 2.0 * t, 6.0 * t]);
+
+        // The saddles carry a square root, which is why a three-dimensional van Hove
+        // point is a cusp and not the peak the square lattice has
+        for saddle in [-2.0 * t, 2.0 * t] {
+            let sing = csf
+                .singularities()
+                .iter()
+                .find(|s| s.position() == saddle)
+                .unwrap();
+            assert!(!sing.is_trivial());
+            // The cusp faces the band centre and the other side is analytic, so the
+            // square root is read off whichever side carries it. It sits on a constant
+            // the pair derived along with it, so two points are needed to separate the
+            // two: S(d) = C + A√d.
+            let side = if saddle < 0.0 { -1.0 } else { 1.0 };
+            let at = |d: f64| sing.value(saddle + side * d);
+            let (near, far) = (1e-8f64, 1e-6f64);
+            let a = (at(far) - at(near)) / (far.sqrt() - near.sqrt());
+            let c = at(near) - a * near.sqrt();
+
+            // A is the coefficient the literature gives, -3/4π²t^{3/2}
+            assert_relative_eq!(
+                a,
+                -3.0 / (4.0 * std::f64::consts::PI.powi(2) * t.powf(1.5)),
+                max_relative = 1e-6
+            );
+            // and a third point lies on the same square root
+            let third = 1e-10f64;
+            assert_relative_eq!(at(third), c + a * third.sqrt(), max_relative = 1e-12);
+        }
+
+        // The band edges carry the same square root at +1/4π²t^{3/2}
+        for edge in [-6.0 * t, 6.0 * t] {
+            let sing = csf
+                .singularities()
+                .iter()
+                .find(|s| s.position() == edge)
+                .unwrap();
+            assert!(!sing.is_trivial());
+            let (d, side) = (1e-8f64, if edge < 0.0 { 1.0 } else { -1.0 });
+            assert_relative_eq!(
+                sing.value(edge + side * d) / d.sqrt(),
+                1.0 / (4.0 * std::f64::consts::PI.powi(2) * t.powf(1.5)),
+                max_relative = 1e-6
+            );
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "hopping constant must be positive")]
+    fn simple_cubic_zero_hopping() {
+        let _ = simple_cubic(0.0, 0.0);
     }
 
     #[test]
