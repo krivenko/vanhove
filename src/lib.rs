@@ -28,6 +28,15 @@ use crate::singularity::{Singularity, Strength};
 // ContinuousSF
 //
 
+/// The mathematics underneath.
+///
+/// A prose account of the splitting of a spectral function into discrete, regular and
+/// singular parts, of what [`SpectralFunction::integrate()`] does with it, and of how
+/// [`SpectralFunction::conv()`] derives the singular structure of a convolution rather
+/// than being told it.
+#[doc = include_str!("../doc/theory.md")]
+pub mod theory {}
+
 /// Continuous spectral function possibly containing integrable singularities.
 ///
 /// It has the form $A(\omega) = R(\omega) + \sum_p S_p(\omega)$ for
