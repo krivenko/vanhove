@@ -147,7 +147,6 @@ impl InterpolatedSF {
     ///
     /// A value above the requested tolerance means the expansion was cut off before
     /// converging, and is an estimate of the relative error of $R(\omega)$.
-    #[allow(dead_code)]
     pub fn fit_error(&self) -> f64 {
         self.panels.iter().fold(0.0f64, |m, p| m.max(p.tail))
     }

@@ -5,11 +5,11 @@
 mod beta;
 mod conv;
 pub mod discrete;
-mod interp;
+pub mod interp;
 mod laurent;
 pub mod models;
 pub mod segment;
-mod singularity;
+pub mod singularity;
 mod util;
 
 use std::f64::consts::PI;
@@ -37,10 +37,63 @@ use crate::singularity::{Singularity, Strength};
 /// $S_p(\omega)$ is described in closed form by the corresponding [`Singularity`],
 /// which fixes it over the whole support and not merely near $\Omega_p$. A support
 /// carrying singularities must be bounded.
-trait ContinuousSF: Send + Sync {
+///
+/// # Example
+///
+/// A band rising as $\frac{3}{2}\sqrt{\omega-\epsilon}$ out of its lower edge and cut
+/// off a unit of frequency above it.
+///
+/// ```
+/// use vanhove::segment::Segment;
+/// use vanhove::singularity::{AsymptTerm, Singularity};
+/// use vanhove::{ContinuousSF, SpectralFunction};
+///
+/// struct SqrtBand {
+///     eps: f64,
+///     edge: [Singularity; 1],
+/// }
+///
+/// impl SqrtBand {
+///     fn new(eps: f64) -> SqrtBand {
+///         let terms = vec![AsymptTerm::power(0.5, 1.5)];
+///         SqrtBand { eps, edge: [Singularity::new(eps, 1.0, terms)] }
+///     }
+/// }
+///
+/// impl ContinuousSF for SqrtBand {
+///     fn support(&self) -> Segment {
+///         Segment::new(self.eps, self.eps + 1.0)
+///     }
+///     // The whole of A(ω) is the singular part, so nothing is left over
+///     fn regular(&self, _omega: f64) -> f64 {
+///         0.0
+///     }
+///     fn singularities(&self) -> &[Singularity] {
+///         &self.edge
+///     }
+///     fn shifted(&self, by: f64) -> Box<dyn ContinuousSF> {
+///         Box::new(SqrtBand::new(self.eps + by))
+///     }
+/// }
+///
+/// let dos = SpectralFunction::from_continuous(SqrtBand::new(0.0));
+///
+/// // The band is normalized, and its first moment is 3/5
+/// assert!((dos.integrate(|_| 1.0, None).unwrap() - 1.0).abs() < 1e-12);
+/// assert!((dos.integrate(|omega| omega, None).unwrap() - 0.6).abs() < 1e-12);
+///
+/// // It convolves like any model of the crate's own, the singular structure of the
+/// // result derived from the band edge it was handed
+/// let twice = dos.conv(&dos, None);
+/// assert!((twice.integrate(|_| 1.0, None).unwrap() - 1.0).abs() < 1e-9);
+/// assert!((twice.integrate(|omega| omega, None).unwrap() - 1.2).abs() < 1e-9);
+/// assert_eq!(twice.support().unwrap(), Segment::new(0.0, 2.0));
+/// ```
+pub trait ContinuousSF: Send + Sync {
     /// Support of the spectral function.
     fn support(&self) -> Segment;
-    /// Regular part, $R(\omega) = A(\omega) - \sum_p S_p(\omega)$.
+    /// Regular part, $R(\omega) = A(\omega) - \sum_p S_p(\omega)$, at an `omega` within
+    /// [`support()`](ContinuousSF::support), where it must be a finite number.
     ///
     /// Smooth between consecutive singular points, which is where it is integrated
     /// and interpolated. How smooth is a matter of how many terms each $S_p$ carries,
@@ -175,7 +228,7 @@ impl SpectralFunction {
     }
 
     /// Build a `SpectralFunction` out of a single continuous contribution of unit weight.
-    fn from_continuous<C: ContinuousSF + 'static>(csf: C) -> SpectralFunction {
+    pub fn from_continuous<C: ContinuousSF + 'static>(csf: C) -> SpectralFunction {
         SpectralFunction::from_discrete_continuous(DiscreteSF::new(), vec![(Arc::new(csf), 1.0)])
     }
 
