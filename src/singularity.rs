@@ -3,7 +3,7 @@
 use std::cmp::Ordering;
 
 use crate::segment::Segment;
-use crate::util::PowKind;
+use crate::util::{PowKind, alternating_sign};
 
 /// One term of the singular part, $c u^r \ln^m u$, in terms of the scaled distance
 /// $u = |\omega - \Omega_p| / s$.
@@ -11,7 +11,7 @@ use crate::util::PowKind;
 pub struct AsymptTerm {
     /// Exponent $r > -1$.
     exponent: f64,
-    /// Power $m \in \\{0, 1\\}$ of the logarithmic factor.
+    /// Power $m \in \\{0, 1, \ldots\\}$ of the logarithmic factor.
     log_power: u8,
     /// Coefficient $c^-$, used below $\Omega_p$.
     c_below: f64,
@@ -32,27 +32,18 @@ impl AsymptTerm {
         AsymptTerm::make(0.0, 1, -c, -c)
     }
 
-    /// $c^\pm u^r$, with a coefficient of its own on either side of $\Omega_p$.
+    /// $c^\pm u^r \ln^m u$, with a coefficient of its own on either side of $\Omega_p$.
     ///
-    ///
-    /// Restricted to $r > 0$, where the term vanishes at $\Omega_p$: one that survives
-    /// there has to approach the same value from either side, $A(\omega)$ having no
-    /// jump at a singular point.
+    /// The sides may differ in any term, a bare constant included: $S_p$ is a piece of
+    /// the splitting rather than $A(\omega)$, so a step at $\Omega_p$ is no jump in the
+    /// spectral function.
     #[allow(dead_code)]
-    pub fn sided(exponent: f64, c_below: f64, c_above: f64) -> AsymptTerm {
-        assert!(
-            exponent > 0.0,
-            "a side-dependent term must vanish at the singular point"
-        );
-        AsymptTerm::make(exponent, 0, c_below, c_above)
+    pub fn sided_log(exponent: f64, log_power: u8, c_below: f64, c_above: f64) -> AsymptTerm {
+        AsymptTerm::make(exponent, log_power, c_below, c_above)
     }
 
     fn make(exponent: f64, log_power: u8, c_below: f64, c_above: f64) -> AsymptTerm {
         assert!(exponent > -1.0, "asymptotics exponent must satisfy r > -1");
-        assert!(
-            log_power <= 1,
-            "at most one logarithmic factor is supported"
-        );
         AsymptTerm {
             // -0.0 would sort below +0.0 in `Strength`, and the two are the same exponent
             exponent: if exponent == 0.0 { 0.0 } else { exponent },
@@ -67,38 +58,44 @@ impl AsymptTerm {
     fn value(&self, below: bool, u: f64) -> f64 {
         let c = if below { self.c_below } else { self.c_above };
         let v = c * self.pow.eval(u);
-        if self.log_power == 0 { v } else { v * u.ln() }
-    }
-
-    /// Integral of the term with coefficient `c` over one side of $\Omega_p$ of length
-    /// `l` in units of $u$, $\int_0^l c u^r \ln^m u\\, du$.
-    fn half_integral(&self, c: f64, l: f64) -> f64 {
-        // The side is empty when Ω_p sits at that end of the support
-        if l == 0.0 {
-            return 0.0;
-        }
-        let rp1 = self.exponent + 1.0;
-        let lp = l.powf(rp1);
         if self.log_power == 0 {
-            c * lp / rp1
+            v
         } else {
-            c * lp * (l.ln() / rp1 - 1.0 / (rp1 * rp1))
+            v * u.ln().powi(i32::from(self.log_power))
         }
     }
 
-    /// Strength of the term as $\omega \to \Omega_p$.
-    fn strength(&self) -> Strength {
-        Strength {
-            exponent: self.exponent,
-            log_power: self.log_power,
-        }
+    /// Integral of the term over the side of $\Omega_p$ given by `below`, of length `l`
+    /// in units of $u$, $\int_0^l c^{\pm} u^r \ln^m u\\, du$.
+    fn half_integral(&self, below: bool, l: f64) -> f64 {
+        let c = if below { self.c_below } else { self.c_above };
+        c * power_log_integral(self.exponent, self.log_power, l)
     }
+}
+
+/// $\int_0^l u^r \ln^m u\\, du$, for $r > -1$.
+///
+/// Each logarithm is integrated by parts against the one below it,
+/// $I_m = (l^{r+1}\ln^m l - m I_{m-1})/(r+1)$.
+#[allow(dead_code)]
+pub(crate) fn power_log_integral(exponent: f64, log_power: u8, l: f64) -> f64 {
+    // The side is empty when Ω_p sits at that end of the support
+    if l == 0.0 {
+        return 0.0;
+    }
+    let rp1 = exponent + 1.0;
+    let lp = l.powf(rp1);
+    let (ln_l, mut integral) = (l.ln(), lp / rp1);
+    for k in 1..=i32::from(log_power) {
+        integral = (lp * ln_l.powi(k) - f64::from(k) * integral) / rp1;
+    }
+    integral
 }
 
 /// Rate at which a term of $S_p$ grows as $\omega \to \Omega_p$.
 ///
-/// $|\omega-\Omega_p|^r$ outgrows $|\omega-\Omega_p|^{r'}$ for $r < r'$, and a
-/// logarithmic factor breaks the tie between equal exponents.
+/// $|\omega-\Omega_p|^r$ outgrows $|\omega-\Omega_p|^{r'}$ for $r < r'$, and at equal
+/// exponents a higher power of $\ln|\omega-\Omega_p|$ outgrows a lower one.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Strength {
     exponent: f64,
@@ -120,6 +117,34 @@ impl Strength {
     }
 }
 
+/// One term of a singular part written out in the distance to $\Omega_p$ itself,
+/// $c^\pm |\omega-\Omega_p|^r \ln^m|\omega-\Omega_p|$.
+///
+/// [`Singularity::unscaled_terms()`] folds the scale in, which costs a term per
+/// logarithm.
+#[derive(Debug, Clone, Copy)]
+#[allow(dead_code)]
+pub(crate) struct UnscaledAsymptTerm {
+    /// Exponent $r$.
+    pub(crate) exponent: f64,
+    /// Power $m$ of the logarithmic factor.
+    pub(crate) log_power: u8,
+    /// Coefficient below $\Omega_p$.
+    pub(crate) c_below: f64,
+    /// Coefficient at and above $\Omega_p$.
+    pub(crate) c_above: f64,
+}
+
+impl UnscaledAsymptTerm {
+    /// How fast the term grows as $\omega \to \Omega_p$.
+    fn strength(&self) -> Strength {
+        Strength {
+            exponent: self.exponent,
+            log_power: self.log_power,
+        }
+    }
+}
+
 /// Isolated integrable singularity of a continuous spectral function.
 ///
 /// The singular part is given in closed form over the whole support as
@@ -132,7 +157,7 @@ impl Strength {
 #[derive(Debug, Clone)]
 pub struct Singularity {
     /// Position of the singular point, $\Omega_p$.
-    pub position: f64,
+    position: f64,
     /// Length $s$ the distance to $\Omega_p$ is measured in.
     scale: f64,
     /// Terms of $S_p(\omega)$.
@@ -143,6 +168,10 @@ impl Singularity {
     /// `scale` is the positive length $s$ the distance to $\Omega_p$ is measured in.
     pub fn new(position: f64, scale: f64, terms: Vec<AsymptTerm>) -> Singularity {
         assert!(
+            position.is_finite(),
+            "a singularity must sit at a finite frequency"
+        );
+        assert!(
             scale > 0.0 && scale.is_finite(),
             "singularity scale must be positive and finite"
         );
@@ -151,6 +180,40 @@ impl Singularity {
             scale,
             terms: terms.into_boxed_slice(),
         }
+    }
+
+    /// $S_p$ written out in $|\omega-\Omega_p|$ rather than in the scaled distance $u$.
+    ///
+    /// Folding the scale in costs terms: with $\ln u = \ln|\omega-\Omega_p| - \ln s$,
+    /// $$
+    ///     c u^r \ln^m u = c s^{-r} \sum_j \binom{m}{j} (-\ln s)^j
+    ///         |\omega-\Omega_p|^r \ln^{m-j}|\omega-\Omega_p|,
+    /// $$
+    /// so one term with $m$ logarithms leaves $m+1$ behind.
+    pub(crate) fn unscaled_terms(&self) -> Vec<UnscaledAsymptTerm> {
+        let ln_scale = self.scale.ln();
+        let mut form = Vec::with_capacity(self.terms.len());
+        for t in &self.terms {
+            let m = i32::from(t.log_power);
+            // Consecutive weights c C(m,j) (-ln s)^j differ by a factor of
+            // -ln(s) (m-j)/(j+1), so one running product carries the whole expansion
+            let mut w = self.scale.powf(-t.exponent);
+            for j in 0..=m {
+                form.push(UnscaledAsymptTerm {
+                    exponent: t.exponent,
+                    log_power: (m - j) as u8,
+                    c_below: t.c_below * w,
+                    c_above: t.c_above * w,
+                });
+                w *= -ln_scale * f64::from(m - j) / f64::from(j + 1);
+            }
+        }
+        form
+    }
+
+    /// Position of the singular point, $\Omega_p$.
+    pub fn position(&self) -> f64 {
+        self.position
     }
 
     /// Whether $S_p$ vanishes identically and can be skipped altogether.
@@ -194,53 +257,48 @@ impl Singularity {
         // The half-integrals are taken over u, and dω = s du restores the scale
         self.terms
             .iter()
-            .map(|t| t.half_integral(t.c_below, below) + t.half_integral(t.c_above, above))
+            .map(|t| t.half_integral(true, below) + t.half_integral(false, above))
             .sum::<f64>()
             * self.scale
     }
 
     /// Limit of $S_p(\omega)$ at $\Omega_p$ with every divergent term dropped.
     ///
-    /// The constant terms survive as they stand and each logarithm leaves $-c\ln s$
-    /// behind, the terms with $r > 0$ vanishing.
+    /// With $\ln u = \ln|\omega-\Omega_p| - \ln s$, a term of $m$ logarithms leaves
+    /// $c(-\ln s)^m$ behind and every other power of the logarithm diverges. The terms
+    /// with $r > 0$ vanish, and those with $r < 0$ do not stay finite at all.
     pub fn finite_limit(&self) -> f64 {
-        let ln_scale = self.scale.ln();
-        self.terms
-            .iter()
-            .filter(|t| t.exponent == 0.0)
-            .map(|t| {
-                if t.log_power == 0 {
-                    t.c_above
-                } else {
-                    -t.c_above * ln_scale
-                }
-            })
+        self.unscaled_terms()
+            .into_iter()
+            .filter(|t| t.exponent == 0.0 && t.log_power == 0)
+            .map(|t| t.c_above)
             .sum()
     }
 
     /// Divergent terms at $\Omega_p$, each with the coefficient of the $\pm\infty$
     /// it tends to.
-    pub fn divergences(&self) -> impl Iterator<Item = (Strength, f64)> + '_ {
-        self.terms.iter().filter_map(|t| {
+    ///
+    /// The coefficients are measured against $|\omega-\Omega_p|$ and not against the
+    /// scaled $u$, so that two singularities may be weighed against each other whatever
+    /// scales they were written with.
+    pub fn divergences(&self) -> impl Iterator<Item = (Strength, f64)> {
+        self.unscaled_terms().into_iter().filter_map(|t| {
             let strength = t.strength();
-            // c u^r tends to sign(c) ∞ for r < 0, while c ln u tends to -sign(c) ∞
-            strength.is_divergent().then(|| {
-                (
-                    strength,
-                    if t.log_power == 0 {
-                        t.c_above
-                    } else {
-                        -t.c_above
-                    },
-                )
-            })
+            // A term of no weight tends nowhere, and folding in a scale of one leaves
+            // several of those behind
+            if !strength.is_divergent() || t.c_above == 0.0 {
+                return None;
+            }
+            // ln|ω-Ω_p| is negative on the way in, so m of them turn the sign over m
+            // times
+            Some((strength, alternating_sign(t.log_power as usize) * t.c_above))
         })
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{AsymptTerm, Singularity};
+    use super::{AsymptTerm, Singularity, Strength};
     use crate::segment::Segment;
     use crate::util::bilby_integrate;
     use approx::assert_relative_eq;
@@ -350,7 +408,7 @@ mod tests {
     #[test]
     fn sided() {
         // 3u below Ω_p and 5u above it, with Ω_p at the origin and u = |ω|
-        let sing = Singularity::new(0.0, 1.0, vec![AsymptTerm::sided(1.0, 3.0, 5.0)]);
+        let sing = Singularity::new(0.0, 1.0, vec![AsymptTerm::sided_log(1.0, 0, 3.0, 5.0)]);
         for omega in [-2.0f64, -0.5, 0.5, 2.0] {
             let c = if omega < 0.0 { 3.0 } else { 5.0 };
             assert_relative_eq!(sing.value(omega), c * omega.abs(), max_relative = 1e-14);
@@ -365,7 +423,7 @@ mod tests {
         );
 
         // The scale divides the distance on both sides alike
-        let scaled = Singularity::new(0.0, 2.0, vec![AsymptTerm::sided(1.0, 3.0, 5.0)]);
+        let scaled = Singularity::new(0.0, 2.0, vec![AsymptTerm::sided_log(1.0, 0, 3.0, 5.0)]);
         assert_relative_eq!(scaled.value(-2.0), 3.0, max_relative = 1e-14);
         assert_relative_eq!(scaled.value(2.0), 5.0, max_relative = 1e-14);
 
@@ -379,9 +437,132 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "must vanish at the singular point")]
-    fn sided_surviving_at_the_point() {
-        let _ = AsymptTerm::sided(0.0, 1.0, 2.0);
+    fn sided_constant() {
+        // 3 below Ω_p and 5 at and above it. The step is legitimate: S_p is a piece of
+        // the splitting, and what A(ω) does at Ω_p is decided by every piece together.
+        let sing = Singularity::new(1.0, 1.0, vec![AsymptTerm::sided_log(0.0, 0, 3.0, 5.0)]);
+        assert_eq!(sing.value(0.5), 3.0);
+        assert_eq!(sing.value(1.5), 5.0);
+        assert_eq!(sing.value(1.0), 5.0);
+
+        // Each side of the integral takes its own coefficient, and what survives at
+        // Ω_p is the upper one
+        assert_relative_eq!(
+            sing.integral(Segment::new(-1.0, 4.0)),
+            3.0 * 2.0 + 5.0 * 3.0,
+            max_relative = 1e-14
+        );
+        assert_eq!(sing.finite_limit(), 5.0);
+        assert_eq!(sing.divergences().count(), 0);
+    }
+
+    #[test]
+    fn many_logarithms() {
+        // A term may carry any number of logarithms, and its integral follows the
+        // recurrence rather than a closed form written out per power
+        let sing = Singularity::new(0.0, 1.0, vec![AsymptTerm::sided_log(-0.5, 2, 1.0, 1.0)]);
+        let u = 0.25f64;
+        assert_relative_eq!(
+            sing.value(u),
+            u.powf(-0.5) * u.ln().powi(2),
+            max_relative = 1e-14
+        );
+
+        // ∫_0^l u^r ln^2 u du against the quadrature it stands for
+        let l = 0.75f64;
+        let reference = bilby_integrate(
+            |u: f64| {
+                if u <= 0.0 {
+                    0.0
+                } else {
+                    u.powf(-0.5) * u.ln().powi(2)
+                }
+            },
+            Segment::new(0.0, l),
+            1e-13,
+        )
+        .unwrap()
+        .value;
+        assert_relative_eq!(
+            sing.integral(Segment::new(0.0, l)),
+            reference,
+            max_relative = 1e-9
+        );
+    }
+
+    #[test]
+    fn finite_limit_with_several_logarithms() {
+        // c ln^m u = c (ln|Δ| - ln s)^m, so what survives Δ → 0 is c (-ln s)^m, and
+        // only the m = 1 case looks like -c ln s
+        let (s, c) = (3.0f64, 2.0f64);
+        for m in 0u8..=3 {
+            let sing = Singularity::new(0.0, s, vec![AsymptTerm::sided_log(0.0, m, c, c)]);
+            assert_relative_eq!(
+                sing.finite_limit(),
+                c * (-s.ln()).powi(i32::from(m)),
+                max_relative = 1e-14
+            );
+        }
+
+        // A scale of one leaves nothing behind but the constant term
+        let sing = Singularity::new(
+            0.0,
+            1.0,
+            vec![
+                AsymptTerm::sided_log(0.0, 0, c, c),
+                AsymptTerm::sided_log(0.0, 2, 5.0, 5.0),
+            ],
+        );
+        assert_relative_eq!(sing.finite_limit(), c, max_relative = 1e-14);
+    }
+
+    #[test]
+    fn divergence_signs() {
+        // c ln^m u tends to (-1)^m sign(c) ∞ for every m > 0
+        for (r, m) in [
+            (0.0f64, 1u8),
+            (0.0, 2),
+            (0.0, 3),
+            (0.0, 4),
+            (-0.5, 0),
+            (-0.5, 1),
+            (-0.5, 2),
+            (-0.5, 3),
+        ] {
+            let sing = Singularity::new(0.0, 1.0, vec![AsymptTerm::sided_log(r, m, 2.0, 2.0)]);
+            let reported = sing.divergences().next().unwrap().1;
+            assert_eq!(
+                reported.signum(),
+                sing.value(1e-8).signum(),
+                "r = {r}, m = {m} reported {reported}"
+            );
+        }
+    }
+
+    #[test]
+    fn divergences_reach_below_the_leading_term() {
+        // Folding the scale into c u^r ln u leaves two terms behind, c s^{-r}|Δ|^r ln|Δ|
+        // and -c s^{-r} ln(s) |Δ|^r, and for r < 0 both of them diverge
+        let (s, c, r) = (3.0f64, 2.0f64, -0.5f64);
+        let sing = Singularity::new(0.0, s, vec![AsymptTerm::sided_log(r, 1, c, c)]);
+        let found: Vec<(u8, f64)> = sing
+            .divergences()
+            .map(|(strength, x)| (strength.log_power, x))
+            .collect();
+
+        assert_eq!(found.len(), 2, "only the leading divergence was reported");
+        let leading = c * s.powf(-r);
+        assert_eq!(found[0].0, 1);
+        assert_relative_eq!(found[0].1, -leading, max_relative = 1e-14);
+        assert_eq!(found[1].0, 0);
+        assert_relative_eq!(found[1].1, -leading * s.ln(), max_relative = 1e-14);
+
+        // The leading sign is the one the term really takes
+        assert_eq!(found[0].1.signum(), sing.value(1e-8).signum());
+
+        // At a scale of one there is nothing below the leading term
+        let unit = Singularity::new(0.0, 1.0, vec![AsymptTerm::sided_log(r, 1, c, c)]);
+        assert_eq!(unit.divergences().count(), 1);
     }
 
     #[test]
@@ -480,11 +661,12 @@ mod tests {
 
     #[test]
     fn strength_order() {
-        let strength = |term: AsymptTerm| term.strength();
-        let log = strength(AsymptTerm::log(1.0));
-        let constant = strength(AsymptTerm::power(0.0, 1.0));
-        let inv_sqrt = strength(AsymptTerm::power(-0.5, 1.0));
-        let inv = strength(AsymptTerm::power(-0.9, 1.0));
+        let strength = |exponent, log_power| Strength {
+            exponent,
+            log_power,
+        };
+        let (log, constant) = (strength(0.0, 1), strength(0.0, 0));
+        let (inv_sqrt, inv) = (strength(-0.5, 0), strength(-0.9, 0));
 
         // A more negative exponent outgrows a less negative one, and both outgrow a
         // logarithm; a bounded term is weaker than every divergence
@@ -493,8 +675,40 @@ mod tests {
         assert_eq!(log.order(&constant), Ordering::Greater);
         assert_eq!(log.order(&log), Ordering::Equal);
 
-        // A constant built from -0.0 is the same strength as one built from +0.0
-        assert_eq!(strength(AsymptTerm::power(-0.0, 1.0)), constant);
+        // A tie between equal exponents is broken by the power of the logarithm, and no
+        // number of logarithms makes up for an exponent that is less negative. Listed
+        // from the weakest, every pair has to order the way the list does.
+        let ascending = [
+            strength(0.5, 0),
+            strength(0.5, 2),
+            strength(0.0, 0),
+            strength(0.0, 1),
+            strength(0.0, 3),
+            strength(-0.5, 0),
+            strength(-0.5, 2),
+            strength(-0.5, 7),
+            strength(-0.9, 0),
+            strength(-0.9, 4),
+        ];
+        for (i, weaker) in ascending.iter().enumerate() {
+            for (j, stronger) in ascending.iter().enumerate() {
+                assert_eq!(
+                    weaker.order(stronger),
+                    i.cmp(&j),
+                    "{weaker:?} vs {stronger:?}"
+                );
+            }
+        }
+
+        // `order()` compares exponents with `total_cmp`, which sorts -0.0 below +0.0.
+        // A term built from either has to reach the same strength all the same, which is
+        // what the exponent is normalized for on the way in.
+        let from = |exponent| {
+            Singularity::new(0.0, 1.0, vec![AsymptTerm::power(exponent, 1.0)]).unscaled_terms()[0]
+                .strength()
+        };
+        assert_eq!(from(-0.0).order(&from(0.0)), Ordering::Equal);
+        assert_eq!(from(-0.0), constant);
     }
 
     #[test]

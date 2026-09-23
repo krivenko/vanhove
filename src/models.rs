@@ -190,13 +190,13 @@ impl SemicircleDOS {
 }
 impl ContinuousSF for SemicircleDOS {
     fn support(&self) -> Segment {
-        Segment::new(self.edges[0].position, self.edges[1].position)
+        Segment::new(self.edges[0].position(), self.edges[1].position())
     }
     fn regular(&self, omega: f64) -> f64 {
         // A(ω) and S_p(ω) both vanish at the edge Ω_p, leaving R(ω) = -S_{1-p}(ω) there
-        if omega == self.edges[0].position {
+        if omega == self.edges[0].position() {
             -self.edges[1].value(omega)
-        } else if omega == self.edges[1].position {
+        } else if omega == self.edges[1].position() {
             -self.edges[0].value(omega)
         } else {
             let x = (omega - self.eps) / self.radius;
@@ -379,13 +379,13 @@ impl ChainDOS {
 }
 impl ContinuousSF for ChainDOS {
     fn support(&self) -> Segment {
-        Segment::new(self.edges[0].position, self.edges[1].position)
+        Segment::new(self.edges[0].position(), self.edges[1].position())
     }
     fn regular(&self, omega: f64) -> f64 {
         // A(ω) - S_p(ω) vanishes at the edge Ω_p, leaving R(ω) = -S_{1-p}(ω) there
-        if omega == self.edges[0].position {
+        if omega == self.edges[0].position() {
             -self.edges[1].value(omega)
-        } else if omega == self.edges[1].position {
+        } else if omega == self.edges[1].position() {
             -self.edges[0].value(omega)
         } else {
             let x = (omega - self.eps) / (2.0 * self.t);
@@ -460,13 +460,13 @@ impl BetheDOS {
 }
 impl ContinuousSF for BetheDOS {
     fn support(&self) -> Segment {
-        Segment::new(self.edges[0].position, self.edges[1].position)
+        Segment::new(self.edges[0].position(), self.edges[1].position())
     }
     fn regular(&self, omega: f64) -> f64 {
         // A(ω) and S_p(ω) both vanish at the edge Ω_p, leaving R(ω) = -S_{1-p}(ω) there
-        if omega == self.edges[0].position {
+        if omega == self.edges[0].position() {
             -self.edges[1].value(omega)
-        } else if omega == self.edges[1].position {
+        } else if omega == self.edges[1].position() {
             -self.edges[0].value(omega)
         } else {
             let domega = omega - self.eps;
@@ -636,7 +636,7 @@ impl ContinuousSF for TriangularDOS {
         self.edges
     }
     fn regular(&self, omega: f64) -> f64 {
-        let ax = ((omega - self.singularity[0].position) / (8.0 * self.t)).abs();
+        let ax = ((omega - self.singularity[0].position()) / (8.0 * self.t)).abs();
         if ax == 0.0 {
             0.0
         } else if ax < Self::SERIES_THRESHOLD {
@@ -646,7 +646,7 @@ impl ContinuousSF for TriangularDOS {
             // d -> 0. Use the expansion in d = (ω-ε)/t - 2 instead,
             // d(3Λ/16 - 9/32) + d^2(15Λ/128 - 99/512) + d^3(21Λ/256 - 75/512)
             // + O(d^4 ln d), where Λ = -ln(ax).
-            let d = (omega - self.singularity[0].position) / self.t;
+            let d = (omega - self.singularity[0].position()) / self.t;
             let l = -ax.ln();
             self.prefactor
                 * d
@@ -1443,7 +1443,7 @@ mod tests {
 
             // The Dirac point lies between the two logarithmic van Hove singularities
             assert_eq!(dos.singularities().len(), 3);
-            assert_eq!(dos.singularities()[1].position, eps);
+            assert_eq!(dos.singularities()[1].position(), eps);
 
             // The two bands meet there with a linear dispersion, so that A(ω) rises out
             // of the Dirac point as |ω-ε|/(\sqrt{3}\pi t^2)
@@ -1634,7 +1634,7 @@ mod tests {
 
             // The touching point lies between the two logarithmic van Hove singularities
             assert_eq!(dos.singularities().len(), 3);
-            assert_eq!(dos.singularities()[1].position, eps);
+            assert_eq!(dos.singularities()[1].position(), eps);
 
             // The two dispersive bands meet there with a linear dispersion, so that
             // A(ω) rises out of the touching point as |ω-ε|/(4\pi t^2)

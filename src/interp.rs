@@ -107,7 +107,7 @@ impl InterpolatedSF {
         let mut breaks: Vec<f64> = csf
             .singularities()
             .iter()
-            .map(|s| s.position)
+            .map(|s| s.position())
             .filter(|&p| support.strictly_contains(p))
             .collect();
         breaks.push(support.min());

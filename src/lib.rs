@@ -263,7 +263,7 @@ impl SpectralFunction {
             let mut value = csf.regular(omega);
             for sing in csf.singularities() {
                 // Away from Ω_p the asymptotics is finite and needs no analysis
-                if sing.position != omega {
+                if sing.position() != omega {
                     value += sing.value(omega);
                     continue;
                 }
@@ -333,7 +333,7 @@ impl SpectralFunction {
                     continue;
                 }
                 // ∫S_p(ω)[f(ω) - f(Ω_p)]dω
-                let omega_p = sing.position;
+                let omega_p = sing.position();
                 let f_p = f(omega_p);
                 res_contrib += util::bilby_integrate(
                     |omega| {
@@ -402,7 +402,7 @@ mod tests {
     use crate::SpectralFunction;
     use crate::models::*;
     use crate::segment::Segment;
-    use approx::assert_relative_eq;
+    use approx::{assert_abs_diff_eq, assert_relative_eq};
     use std::f64::consts::PI;
 
     #[test]
@@ -507,6 +507,28 @@ mod tests {
         // logarithmic peak of the square lattice, both sitting at ω = 0.
         let dos = square(0.0, 1.0) + (-1.0) * chain(2.0, 1.0);
         assert_eq!(dos.continuous_at(0.0), f64::NEG_INFINITY);
+    }
+
+    #[test]
+    fn continuous_at_cancelling_across_scales() {
+        // Two |ω|^(-1/2) edges at the origin, one of unit width and one four times as
+        // wide. A logarithm is written in units of its scale and a power law is not, so
+        // here the scales have to be folded in before the coefficients can be compared.
+        let (narrow, wide) = (powerlaw(0.0, -0.5, 1.0), powerlaw(0.0, -0.5, 4.0));
+
+        // The true coefficients stand as 2 : 1, so this pair cancels and the divergence
+        // is gone - not merely outweighed
+        let cancelling = narrow.clone() + (-2.0) * wide.clone();
+        assert!(cancelling.continuous_at(0.0).is_finite());
+        for omega in [1e-6f64, 1e-10] {
+            assert_abs_diff_eq!(cancelling.continuous_at(omega), 0.0, epsilon = 1e-12);
+        }
+
+        // Equal and opposite coefficients as stored do not cancel, the two being
+        // written against different distances, and what is left of them diverges
+        let surviving = narrow + (-1.0) * wide;
+        assert_eq!(surviving.continuous_at(0.0), f64::INFINITY);
+        assert!(surviving.continuous_at(1e-10) > 1e4);
     }
 
     #[test]
