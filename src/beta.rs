@@ -6,8 +6,6 @@
 //! therefore with respect to the *parameters*, not the argument, which is what no library
 //! offers.
 
-#![allow(dead_code)]
-
 use std::ops::{AddAssign, Mul};
 
 use special::Gamma;

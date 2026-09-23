@@ -37,7 +37,6 @@ impl AsymptTerm {
     /// The sides may differ in any term, a bare constant included: $S_p$ is a piece of
     /// the splitting rather than $A(\omega)$, so a step at $\Omega_p$ is no jump in the
     /// spectral function.
-    #[allow(dead_code)]
     pub fn sided_log(exponent: f64, log_power: u8, c_below: f64, c_above: f64) -> AsymptTerm {
         AsymptTerm::make(exponent, log_power, c_below, c_above)
     }
@@ -77,7 +76,6 @@ impl AsymptTerm {
 ///
 /// Each logarithm is integrated by parts against the one below it,
 /// $I_m = (l^{r+1}\ln^m l - m I_{m-1})/(r+1)$.
-#[allow(dead_code)]
 pub(crate) fn power_log_integral(exponent: f64, log_power: u8, l: f64) -> f64 {
     // The side is empty when Ω_p sits at that end of the support
     if l == 0.0 {
@@ -123,7 +121,6 @@ impl Strength {
 /// [`Singularity::unscaled_terms()`] folds the scale in, which costs a term per
 /// logarithm.
 #[derive(Debug, Clone, Copy)]
-#[allow(dead_code)]
 pub(crate) struct UnscaledAsymptTerm {
     /// Exponent $r$.
     pub(crate) exponent: f64,

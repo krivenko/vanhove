@@ -3,6 +3,7 @@
 #![warn(missing_docs)]
 
 mod beta;
+mod conv;
 pub mod discrete;
 mod interp;
 mod laurent;
@@ -227,13 +228,40 @@ impl SpectralFunction {
 
     /// Convolution with another spectral function,
     /// $\int A(\nu) B(\omega - \nu) d\nu$.
-    pub fn conv(&self, other: &SpectralFunction) -> SpectralFunction {
-        assert!(
-            self.continuous.is_empty() || other.continuous.is_empty(),
-            "convolution of two continuous spectral functions is not supported yet"
-        );
+    ///
+    /// The singular structure of the result is derived rather than supplied: its van
+    /// Hove points are the pairwise sums of the frequencies where either operand stops
+    /// being smooth, and the asymptotics at each follows from the asymptotic forms of
+    /// the two. What is left over is interpolated to the relative tolerance `tol`,
+    /// which defaults to $10^{-12}$.
+    pub fn conv(&self, other: &SpectralFunction, tol: Option<f64>) -> SpectralFunction {
+        // Every resonance of one operand against the continuous part of the other
         let mut continuous = conv_discrete_continuous(&self.discrete, other);
         continuous.extend(conv_discrete_continuous(&other.discrete, self));
+
+        // Each pair of continuous contributions against each other. A convolution of
+        // two of them is one of them in its own right, so it is interpolated on its own
+        // and carries the two weights multiplied together rather than folded into it.
+        let tol = tol.unwrap_or(InterpolatedSF::DEFAULT_TOL);
+        for (c1, w1) in &self.continuous {
+            for (c2, w2) in &other.continuous {
+                let (c1, c2) = (c1.as_ref(), c2.as_ref());
+                let support = conv::pair_support(c1, c2);
+                let singularities = conv::pair_singularities(c1, c2);
+                // What is taken away is the structure just derived, not the closed
+                // form the pairs are computed with: the two agree as the singular
+                // point is approached and differ away from it, the derived one
+                // stopping at an exponent the interpolation can carry on its own.
+                let regular = |omega: f64| {
+                    let singular: f64 = singularities.iter().map(|s| s.value(omega)).sum();
+                    conv::pair_value(c1, c2, omega, tol) - singular
+                };
+                let interpolated =
+                    InterpolatedSF::from_parts(support, singularities.clone(), regular, Some(tol));
+                continuous.push((Arc::new(interpolated) as Arc<dyn ContinuousSF>, w1 * w2));
+            }
+        }
+
         SpectralFunction::from_discrete_continuous(self.discrete.conv(&other.discrete), continuous)
     }
 
@@ -738,7 +766,7 @@ mod tests {
     #[test]
     fn conv_discrete_continuous() {
         // A unit resonance displaces a band to its position
-        let shifted = discrete(&[1.5], &[1.0]).conv(&semicircle(0.0, 2.0));
+        let shifted = discrete(&[1.5], &[1.0]).conv(&semicircle(0.0, 2.0), None);
         let reference = semicircle(1.5, 2.0);
         assert_eq!(shifted.support(), reference.support());
         for omega in [-0.5, 0.4, 1.5, 2.6, 3.5] {
@@ -750,14 +778,14 @@ mod tests {
         }
 
         // Singular points travel with the band
-        let shifted = discrete(&[2.0], &[1.0]).conv(&square(0.0, 1.0));
+        let shifted = discrete(&[2.0], &[1.0]).conv(&square(0.0, 1.0), None);
         assert_eq!(shifted.continuous_at(2.0), f64::INFINITY);
         assert_eq!(shifted.support(), Some(Segment::new(-2.0, 6.0)));
 
         // Weight is multiplicative, and the operands need not be normalized
         let a = 0.5 * discrete(&[-1.0, 2.0], &[0.25, 0.75]);
         let b = 3.0 * chain(0.0, 1.0);
-        let c = a.conv(&b);
+        let c = a.conv(&b, None);
         assert_relative_eq!(
             c.total_weight(),
             a.total_weight() * b.total_weight(),
@@ -772,7 +800,7 @@ mod tests {
         for omega in [-2.5, 0.0, 1.3, 3.5] {
             assert_relative_eq!(
                 c.continuous_at(omega),
-                b.conv(&a).continuous_at(omega),
+                b.conv(&a, None).continuous_at(omega),
                 max_relative = 1e-14
             );
         }
@@ -815,7 +843,7 @@ mod tests {
             square(0.5, 1.0).precomputed(None),
         ];
         for dos in models {
-            let moved = unit.conv(&dos);
+            let moved = unit.conv(&dos, None);
             let support = dos.support().unwrap();
             let (lo, hi) = (support.min().max(-20.0), support.max().min(20.0));
             for i in 0..=40 {
@@ -832,9 +860,96 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "two continuous spectral functions")]
     fn conv_two_continuous() {
-        let _ = chain(0.0, 1.0).conv(&square(0.0, 1.0));
+        // Two continuous parts convolve into one interpolated contribution carrying
+        // the whole spectral weight between them
+        let c = chain(0.0, 1.0).conv(&square(0.0, 1.0), None);
+        assert_relative_eq!(c.total_weight(), 1.0, max_relative = 1e-9);
+        assert!(c.discrete().is_empty());
+        assert_relative_eq!(
+            c.integrate(|_| 1.0, None).unwrap(),
+            1.0,
+            max_relative = 1e-9
+        );
+    }
+
+    /// A linear chain against itself is the square lattice, the two dispersions being
+    /// independent one-dimensional bands. Nothing in the library is told so.
+    #[test]
+    fn conv_of_two_chains_is_the_square_lattice() {
+        let t = 1.3f64;
+        let derived = chain(0.0, t).conv(&chain(0.0, t), None);
+        let known = square(0.0, t);
+        for i in 0..=120 {
+            let omega = -3.99 * t + 7.98 * t * f64::from(i) / 120.0;
+            let want = known.continuous_at(omega);
+            if want.abs() < 1e-9 {
+                continue;
+            }
+            assert_relative_eq!(derived.continuous_at(omega), want, max_relative = 1e-9);
+        }
+    }
+
+    /// Moments of a convolution follow the binomial rule whatever the operands are.
+    #[test]
+    fn conv_moments_follow_the_binomial_rule() {
+        let (a, b) = (chain(0.0, 1.0), semicircle(0.5, 2.0));
+        let c = a.conv(&b, None);
+        let moment =
+            |sf: &SpectralFunction, n: i32| sf.integrate(|omega: f64| omega.powi(n), None).unwrap();
+        for n in 0..=4i32 {
+            let want: f64 = (0..=n)
+                .map(|k| {
+                    let binomial = crate::util::binomials(n as usize)[k as usize];
+                    binomial * moment(&a, k) * moment(&b, n - k)
+                })
+                .sum();
+            assert_relative_eq!(moment(&c, n), want, max_relative = 1e-8, epsilon = 1e-10);
+        }
+    }
+
+    /// Both operands carrying both kinds of part, which is the case the four ways of
+    /// pairing them all have to answer for at once.
+    #[test]
+    fn conv_of_mixed_spectral_functions() {
+        let a = 0.4 * discrete(&[-1.0, 0.5], &[0.3, 0.7]) + 0.6 * chain(0.0, 1.0);
+        let b = 0.25 * discrete(&[2.0], &[1.0]) + 0.75 * flat(0.0, 1.0, 0.0);
+        let c = a.conv(&b, None);
+
+        // Weight is multiplicative, and each of the four pairings carries its share
+        assert_relative_eq!(
+            c.total_weight(),
+            a.total_weight() * b.total_weight(),
+            max_relative = 1e-9
+        );
+        assert_relative_eq!(
+            c.integrate(|_| 1.0, None).unwrap(),
+            a.total_weight() * b.total_weight(),
+            max_relative = 1e-8
+        );
+
+        // The first moment adds, weighted
+        let mean = |sf: &SpectralFunction| sf.integrate(|w: f64| w, None).unwrap();
+        assert_relative_eq!(
+            mean(&c),
+            mean(&a) * b.total_weight() + a.total_weight() * mean(&b),
+            max_relative = 1e-8,
+            epsilon = 1e-10
+        );
+    }
+
+    /// Two boxes convolve into their triangle, and the result is fitted exactly
+    /// although nothing of it is derived: a kink at a panel boundary is a polynomial
+    /// either side of it.
+    #[test]
+    fn conv_of_two_boxes_is_a_triangle() {
+        let d = 1.5f64;
+        let c = flat(0.0, d, 0.0).conv(&flat(0.0, d, 0.0), None);
+        for i in 0..=60 {
+            let omega = -2.0 * d + 4.0 * d * f64::from(i) / 60.0;
+            let want = (2.0 * d - omega.abs()).max(0.0) / (4.0 * d * d);
+            assert_relative_eq!(c.continuous_at(omega), want, epsilon = 1e-12);
+        }
     }
 
     #[test]

@@ -103,7 +103,6 @@ impl InterpolatedSF {
     ///
     /// `regular` is sampled strictly between consecutive singular points, never at one,
     /// and carries whatever `singularities` describes already subtracted.
-    #[allow(dead_code)]
     pub fn from_parts<F: Fn(f64) -> f64>(
         support: Segment,
         singularities: Vec<Singularity>,

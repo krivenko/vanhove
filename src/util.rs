@@ -148,7 +148,6 @@ pub fn bilby_integrate<F: Fn(f64) -> f64>(
 /// Refusal is about the request rather than the integrand: a tolerance that is no
 /// number, an interval that is no interval. An integrand the quadrature cannot resolve
 /// is not refused at all - it comes back as a value, only a less accurate one.
-#[allow(dead_code)]
 pub fn bilby_integrate_or_0<F: Fn(f64) -> f64>(f: F, segment: Segment, tol: f64) -> f64 {
     bilby_integrate(f, segment, tol).map_or(0.0, |r| r.value)
 }
@@ -158,7 +157,6 @@ pub fn bilby_integrate_or_0<F: Fn(f64) -> f64>(f: F, segment: Segment, tol: f64)
 /// Each coefficient follows from the one before it, which is cheaper than asking for
 /// them one at a time and is how they are wanted wherever a binomial expansion is
 /// summed over.
-#[allow(dead_code)]
 pub fn binomials(n: usize) -> Vec<f64> {
     let mut c_row = vec![1.0; n + 1];
     for k in 1..=n {
@@ -171,7 +169,6 @@ pub fn binomials(n: usize) -> Vec<f64> {
 pub type Table = Vec<Vec<f64>>;
 
 /// Elementwise difference of two tables.
-#[allow(dead_code)]
 pub fn subtract_tables(x: &Table, y: &Table) -> Table {
     x.iter()
         .zip(y)
@@ -180,19 +177,16 @@ pub fn subtract_tables(x: &Table, y: &Table) -> Table {
 }
 
 /// A table with every entry turned over.
-#[allow(dead_code)]
 pub fn negate_table(x: &Table) -> Table {
     x.iter().map(|r| r.iter().map(|v| -v).collect()).collect()
 }
 
 /// $(-1)^n$.
-#[allow(dead_code)]
 pub fn alternating_sign(n: usize) -> f64 {
     if n.is_multiple_of(2) { 1.0 } else { -1.0 }
 }
 
 /// Whether `x` is one of $0, 1, 2, \ldots$
-#[allow(dead_code)]
 pub fn is_natural(x: f64) -> bool {
     x >= 0.0 && x.fract() == 0.0
 }
@@ -204,7 +198,6 @@ pub fn is_natural(x: f64) -> bool {
 /// The recurrence $\psi^{(n)}(x) = \psi^{(n)}(x+1) - (-1)^n n!\\,x^{-n-1}$ walks the
 /// argument up to where the asymptotic series converges, which is what carries the
 /// negative arguments: the reflection formula is never needed.
-#[allow(dead_code)]
 pub fn polygamma(n: u32, x: f64) -> f64 {
     /// $B_{2k}$ for $k = 1, 2, \ldots$
     const BERNOULLI: [f64; 8] = [
