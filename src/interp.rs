@@ -81,7 +81,7 @@ pub struct InterpolatedSF {
 
 impl InterpolatedSF {
     /// Default relative tolerance of the fit.
-    const DEFAULT_TOL: f64 = 1e-12;
+    pub(crate) const DEFAULT_TOL: f64 = 1e-12;
 
     /// Interpolate the regular part of `csf`.
     ///
@@ -90,7 +90,26 @@ impl InterpolatedSF {
     /// the fit actually achieved: a regular part that is not smooth at an end of a
     /// panel converges too slowly to reach any tolerance worth asking for.
     pub fn new(csf: &dyn ContinuousSF, tol: Option<f64>) -> InterpolatedSF {
-        let support = csf.support();
+        InterpolatedSF::from_parts(
+            csf.support(),
+            csf.singularities().into(),
+            |omega| csf.regular(omega),
+            tol,
+        )
+    }
+
+    /// Interpolate a regular part handed over on its own, along with the support and
+    /// the singular structure it belongs to.
+    ///
+    /// `regular` is sampled strictly between consecutive singular points, never at one,
+    /// and carries whatever `singularities` describes already subtracted.
+    #[allow(dead_code)]
+    pub fn from_parts<F: Fn(f64) -> f64>(
+        support: Segment,
+        singularities: Vec<Singularity>,
+        regular: F,
+        tol: Option<f64>,
+    ) -> InterpolatedSF {
         assert!(
             support.is_bounded(),
             "an interpolated spectral function must have a bounded support"
@@ -104,8 +123,7 @@ impl InterpolatedSF {
 
         // Panel boundaries: the ends of the support, and the singular points between
         // them, which is every frequency where R(ω) stops being smooth
-        let mut breaks: Vec<f64> = csf
-            .singularities()
+        let mut breaks: Vec<f64> = singularities
             .iter()
             .map(|s| s.position())
             .filter(|&p| support.strictly_contains(p))
@@ -119,9 +137,9 @@ impl InterpolatedSF {
             support,
             panels: breaks
                 .windows(2)
-                .map(|lr| Panel::fit(Segment::new(lr[0], lr[1]), &|omega| csf.regular(omega), tol))
+                .map(|lr| Panel::fit(Segment::new(lr[0], lr[1]), &regular, tol))
                 .collect(),
-            singularities: csf.singularities().into(),
+            singularities: singularities.into_boxed_slice(),
         }
     }
 
@@ -199,15 +217,7 @@ mod tests {
         }
     }
 
-    fn model<F>(min: f64, max: f64, regular: F) -> Model<F> {
-        Model {
-            support: Segment::new(min, max),
-            singularities: vec![],
-            regular,
-        }
-    }
-
-    fn with_sing<F>(min: f64, max: f64, singularities: Vec<Singularity>, regular: F) -> Model<F> {
+    fn model<F>(min: f64, max: f64, singularities: Vec<Singularity>, regular: F) -> Model<F> {
         Model {
             support: Segment::new(min, max),
             singularities,
@@ -228,7 +238,7 @@ mod tests {
     fn smooth_fit() {
         // A function analytic on the panel is caught to machine precision
         let f = |omega: f64| (-(omega - 0.5).powi(2)).exp();
-        let interp = InterpolatedSF::new(&model(-2.0, 3.0, f), None);
+        let interp = InterpolatedSF::new(&model(-2.0, 3.0, vec![], f), None);
         assert_eq!(interp.support(), Segment::new(-2.0, 3.0));
         assert!(interp.singularities().is_empty());
         assert!(interp.fit_error() <= 1e-12);
@@ -246,7 +256,7 @@ mod tests {
     fn panels_split_at_singular_points() {
         let log = |position| Singularity::new(position, 1.0, vec![AsymptTerm::log(1.0)]);
         // An interior singular point splits the support in two
-        let interp = InterpolatedSF::new(&with_sing(-1.0, 2.0, vec![log(0.0)], f64::abs), None);
+        let interp = InterpolatedSF::new(&model(-1.0, 2.0, vec![log(0.0)], f64::abs), None);
         assert_eq!(interp.panels.len(), 2);
 
         // |ω| is a kink each panel resolves exactly, being linear on either side
@@ -254,12 +264,12 @@ mod tests {
 
         // A singular point sitting at an end of the support adds no panel
         let edge = Singularity::new(-1.0, 1.0, vec![AsymptTerm::power(0.5, 1.0)]);
-        let interp = InterpolatedSF::new(&with_sing(-1.0, 2.0, vec![edge], |o: f64| o), None);
+        let interp = InterpolatedSF::new(&model(-1.0, 2.0, vec![edge], |o: f64| o), None);
         assert_eq!(interp.panels.len(), 1);
 
         // Two singularities at one point are one break, not two
         let sings = vec![log(0.5), log(0.5)];
-        let interp = InterpolatedSF::new(&with_sing(-1.0, 2.0, sings, f64::abs), None);
+        let interp = InterpolatedSF::new(&model(-1.0, 2.0, sings, f64::abs), None);
         assert_eq!(interp.panels.len(), 2);
     }
 
@@ -267,7 +277,7 @@ mod tests {
     fn singularities_carried_over() {
         // The singular part passes through untouched, only R(ω) being approximated
         let sing = Singularity::new(0.5, 2.0, vec![AsymptTerm::power(-0.5, 3.0)]);
-        let m = with_sing(-1.0, 2.0, vec![sing.clone()], |omega: f64| omega);
+        let m = model(-1.0, 2.0, vec![sing.clone()], |omega: f64| omega);
         let interp = InterpolatedSF::new(&m, None);
         assert_eq!(interp.singularities().len(), 1);
         for omega in [-1.0, 0.0, 1.0, 2.0] {
@@ -287,13 +297,13 @@ mod tests {
             }
         };
 
-        let whole = InterpolatedSF::new(&model(-2.0, 2.0, f), None);
+        let whole = InterpolatedSF::new(&model(-2.0, 2.0, vec![], f), None);
         assert!(whole.fit_error() > 1e-13);
         assert!(whole.panels[0].coeffs.len() >= Panel::MAX_ORDER - 1);
 
         // A singularity with no terms subtracts nothing and only marks the point
         let kink = Singularity::new(0.0, 1.0, vec![]);
-        let split = InterpolatedSF::new(&with_sing(-2.0, 2.0, vec![kink], f), None);
+        let split = InterpolatedSF::new(&model(-2.0, 2.0, vec![kink], f), None);
         assert_eq!(split.panels.len(), 2);
         assert!(split.fit_error() <= 1e-12);
         assert!(worst_error(&split, f) < 1e-11);
@@ -306,6 +316,9 @@ mod tests {
     #[test]
     #[should_panic(expected = "must have a bounded support")]
     fn unbounded_support() {
-        let _ = InterpolatedSF::new(&model(f64::NEG_INFINITY, 1.0, |omega: f64| omega), None);
+        let _ = InterpolatedSF::new(
+            &model(f64::NEG_INFINITY, 1.0, vec![], |omega: f64| omega),
+            None,
+        );
     }
 }
