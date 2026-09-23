@@ -16,6 +16,10 @@ impl Segment {
     /// Make a segment spanning `min` to `max`.
     pub fn new(min: f64, max: f64) -> Segment {
         assert!(min <= max, "segment bounds must satisfy min <= max");
+        assert!(
+            min < max || min.is_finite(),
+            "a segment of zero length must sit at a finite frequency"
+        );
         Segment { min, max }
     }
 
@@ -156,6 +160,19 @@ mod tests {
     #[should_panic(expected = "min <= max")]
     fn new_nan() {
         let _ = Segment::new(f64::NAN, 1.0);
+    }
+
+    #[test]
+    #[should_panic(expected = "must sit at a finite frequency")]
+    fn new_degenerate_at_infinity() {
+        // Its length would be the difference of two infinities, which is no number
+        let _ = Segment::new(f64::INFINITY, f64::INFINITY);
+    }
+
+    #[test]
+    #[should_panic(expected = "must sit at a finite frequency")]
+    fn new_degenerate_at_negative_infinity() {
+        let _ = Segment::new(f64::NEG_INFINITY, f64::NEG_INFINITY);
     }
 
     #[test]
