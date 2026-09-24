@@ -1,5 +1,7 @@
 //! Segments of the frequency axis.
 
+use std::ops::Add;
+
 /// Segment of the frequency axis, $[\omega_{min}, \omega_{max}]$.
 ///
 /// A segment of zero length is a valid one, a discrete spectral function of a single
@@ -111,6 +113,21 @@ impl Segment {
         let min = f64::max(self.min, other.min);
         let max = f64::min(self.max, other.max);
         (min <= max).then_some(Segment { min, max })
+    }
+}
+
+/// Sum of two segments, $[\omega^1_{min} + \omega^2_{min}, \omega^1_{max} + \omega^2_{max}]$.
+///
+/// A convolution is supported on the sum of the supports of its two factors, each
+/// frequency of the one reached from every frequency of the other.
+impl Add for Segment {
+    type Output = Segment;
+
+    fn add(self, other: Segment) -> Segment {
+        Segment {
+            min: self.min + other.min,
+            max: self.max + other.max,
+        }
     }
 }
 
@@ -252,6 +269,30 @@ mod tests {
     #[should_panic(expected = "within it")]
     fn split_at_outside() {
         let _ = Segment::new(-1.5, 2.0).split_at(2.5);
+    }
+
+    #[test]
+    fn add() {
+        assert_eq!(
+            Segment::new(-1.5, 2.0) + Segment::new(0.5, 3.0),
+            Segment::new(-1.0, 5.0)
+        );
+
+        // A segment of zero length displaces the other without widening it
+        let point = Segment::new(2.0, 2.0);
+        assert_eq!(point + point, Segment::new(4.0, 4.0));
+        let segment = Segment::new(-1.5, 2.0);
+        assert_eq!(segment + point, segment.shifted(2.0));
+
+        // Lengths add, so the sum is as wide as the two together
+        let (x, y) = (Segment::new(-1.5, 2.0), Segment::new(0.5, 3.0));
+        assert_eq!((x + y).length(), x.length() + y.length());
+
+        // One unbounded operand reaches as far in the sum
+        let upper = Segment::new(0.0, f64::INFINITY);
+        assert_eq!(segment + upper, Segment::new(-1.5, f64::INFINITY));
+        let whole = Segment::new(f64::NEG_INFINITY, f64::INFINITY);
+        assert_eq!(segment + whole, whole);
     }
 
     #[test]
