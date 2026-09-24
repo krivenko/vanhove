@@ -1,6 +1,6 @@
 # The mathematics underneath
 
-A density of states is not a smooth curve. It has delta peaks, it has cusps and
+A density of states is not necessarily a smooth curve. It can have delta-peaks, cusps and
 logarithmic divergences at the van Hove points, and it has a smooth remainder in
 between. Everything in this crate follows from taking that split seriously:
 writing the singular pieces in closed form, and handing the quadrature only what
@@ -9,7 +9,7 @@ it can actually integrate.
 ## The splitting
 
 A spectral function is a weighted sum of discrete resonances and continuous
-contributions. The discrete part is exact — positions and weights, nothing to
+contributions. The discrete part is exact - positions and weights, nothing to
 approximate. Each continuous contribution is split again, into a regular part and
 one singular part for every frequency where it stops being smooth:
 
@@ -59,7 +59,7 @@ crawl, but they still converge on the right answer.
 **The Lieb lattice, actually split.** The flat band is a single resonance carrying
 a third of the weight; the dispersive bands contribute two logarithmic van Hove
 points at $\epsilon \pm 2t$ and a kink where they touch at $\epsilon$. What is
-left over — the regular part, drawn here on a scale magnified about twenty times —
+left over - the regular part, drawn here on a scale magnified about twenty times -
 is smooth, and it is the only piece the quadrature ever sees.
 
 </figcaption>
@@ -102,8 +102,8 @@ is not a convenience. It is what the next section spends.
 
 ## What `integrate()` does
 
-Integrating $A(\omega)$ against a test function $f$ — a Fermi function, a moment,
-a Green's function kernel — the discrete part is a sum, and each continuous
+Integrating $A(\omega)$ against a test function $f$ - a Fermi function, a moment,
+a Green's function kernel - the discrete part is a sum, and each continuous
 contribution is taken apart:
 
 $$
@@ -116,7 +116,7 @@ $$
 The middle term is the trick. Handing $\int S_p f$ straight to a quadrature puts a
 divergence under it, and Gauss-Kronrod converges too slowly there to notice that
 it has not converged. Subtracting the value of $f$ at the singular point costs
-nothing — the third term puts it back — and it changes the character of the
+nothing - the third term puts it back - and it changes the character of the
 integrand completely. Near $\Omega_p$ the difference $f - f(\Omega_p)$ vanishes
 linearly, so the product behaves as $u^{r+1}$ with $r + 1 > 0$: bounded, and going
 to zero.
@@ -168,9 +168,9 @@ $$
 $$
 
 Two resonances convolve into a resonance at the sum of their positions carrying
-the product of their weights — exact, and closed under the operation. A resonance
+the product of their weights - exact, and closed under the operation. A resonance
 against a band displaces the whole band to the resonance's position and scales it
-by the weight — also exact, since every model knows how to shift itself. Those
+by the weight - also exact, since every model knows how to shift itself. Those
 three terms are bookkeeping.
 
 The fourth is the real problem, and it is four problems. Writing each continuous
@@ -183,7 +183,7 @@ $$
 
 and these are not equally hard either. The first has nothing singular in it at
 all. The middle two carry one divergence each, against a factor that has none, and
-a single subtraction disposes of it — unconditionally, because $R$ is at worst
+a single subtraction disposes of it - unconditionally, because $R$ is at worst
 Lipschitz, so anchoring it at the singular point always leaves a bounded
 integrand. Only the last can put two divergences at one and the same $\nu$, and
 that one is never handed to a quadrature: it has a closed form, which is the
@@ -197,7 +197,7 @@ as good as the singular structure it is told to expand around. That structure is
 
 The convolution integral runs over $\nu$, with the first factor evaluated at $\nu$
 and the second at $\omega - \nu$. It loses smoothness in $\omega$ where *both*
-factors are singular at one and the same $\nu$ — where $\nu - \Omega_1 = 0$ and
+factors are singular at one and the same $\nu$ - where $\nu - \Omega_1 = 0$ and
 $\omega - \nu - \Omega_2 = 0$ hold together. Eliminating $\nu$,
 
 $$
@@ -212,7 +212,7 @@ there, and a band edge is that constant on one side and nothing on the other. So
 band edge pairs with a singular point the same way two singular points pair with
 each other, and the band edges of the result stop being a special case.
 
-Every such pairing is derived but one — a constant against a constant, which is
+Every such pairing is derived but one - a constant against a constant, which is
 $R \ast R$ and is left alone for reasons taken up at the end.
 
 ## Three stretches
@@ -264,7 +264,7 @@ sign of $\Delta$. Of the four possible sign combinations only three are ever liv
 **The three stretches.** The middle one has length $|\Delta|$ and takes both
 factors from the same side, swapping with the sign of $\Delta$; the outer two run
 out to where the support ends and keep their sides throughout. Each is a Beta
-function — the middle a complete one, the outer two incomplete, cut at the length
+function - the middle a complete one, the outer two incomplete, cut at the length
 they actually have.
 
 </figcaption>
@@ -325,7 +325,7 @@ $$
         \left(\frac{\Delta}{\Delta+L}\right)^{n}}_{\text{analytic in }\Delta}
 $$
 
-— the prefactor collapsing because $\Delta^{\rho}(1-z)^{b} = (\Delta+L)^{\rho}$. The
+- the prefactor collapsing because $\Delta^{\rho}(1-z)^{b} = (\Delta+L)^{\rho}$. The
 first term is what an infinite limit would have given on its own. The second is
 what taking it to infinity throws away, and it is analytic, which is why throwing
 it away is legitimate *for the asymptotics*. It is not legitimate for the value,
@@ -336,7 +336,7 @@ and it is not thrown away here.
 The obvious way to differentiate a Beta function is through its logarithm, which
 turns derivatives into polygammas. It fails here. The outer stretches land on
 $\alpha + \gamma = -r_2$, a pole of $\Gamma$ whenever the other exponent is a whole
-number — and a constant or a bare logarithm is exactly $r_2 = 0$, the commonest
+number - and a constant or a bare logarithm is exactly $r_2 = 0$, the commonest
 case there is. There $B$ vanishes while its derivatives do not, so through $\ln B$
 the two meet as $0 \cdot \infty$. Taking the derivatives through
 
@@ -350,7 +350,7 @@ construction.
 ## Computing the incomplete Beta
 
 Nothing in the Rust ecosystem offers $\partial_a^j \partial_b^k B_z(a,b)$, and
-nothing offers $B_z(a,b)$ for $b \leq 0$ at all — the usual routines are written
+nothing offers $B_z(a,b)$ for $b \leq 0$ at all - the usual routines are written
 for the regularized $I_x(a,b)$ with both parameters positive. It is written from
 scratch here, out of the series
 
@@ -381,12 +381,12 @@ series converges fastest where the accuracy matters most.
 
 The reflection has a catch, and it is the interesting case rather than an awkward
 one. $b = -\rho$, so $b$ is a non-positive integer exactly when $\rho$ is a whole
-number $n$ — and there both halves are infinite. $\Gamma(b)$ has a pole, and so
+number $n$ - and there both halves are infinite. $\Gamma(b)$ has a pole, and so
 does the one term of the series whose denominator $b + n$ vanishes.
 
 They cancel, but not symmetrically, and what survives is the point. Write
 $\rho = n - \epsilon$. The reflected half carries $\Delta^{\rho}(1-z)^{b+n}$, which
-is $(\Delta+L)^{\rho}$ up to $e^{-\epsilon\ln(\Delta+L)}$ — no $\ln\Delta$ anywhere
+is $(\Delta+L)^{\rho}$ up to $e^{-\epsilon\ln(\Delta+L)}$ - no $\ln\Delta$ anywhere
 in it. The first half carries $\Delta^{\rho} = \Delta^{n}e^{-\epsilon\ln\Delta}$
 against a $1/\epsilon$, and that does leave one:
 
@@ -402,20 +402,20 @@ $$
 X^{\mathrm{lo}}_1 = -\binom{r_2}{n}, \qquad X^{\mathrm{hi}}_1 = -\binom{r_1}{n}.
 $$
 
-This is where the physics is. Two inverse square roots — the band edges of a
-linear chain — meet at $\rho = 0$, and the logarithm that comes out is the van Hove
+This is where the physics is. Two inverse square roots - the band edges of a
+linear chain - meet at $\rho = 0$, and the logarithm that comes out is the van Hove
 singularity at the centre of the square lattice band. The library is never told
 this; it falls out of the two binomials.
 
 And it explains an absence. Two locally constant factors are $r_1 = r_2 = 0$,
 $n = 1$, where both binomials ask for more than they have and vanish. Two smooth
-constants convolve into no logarithm at all — which is why a van Hove saddle in
+constants convolve into no logarithm at all - which is why a van Hove saddle in
 three dimensions is a square-root cusp and not a peak.
 
 Beside the logarithm sits a term in $\Delta^n$ with no logarithm on it, and it is
 the one term in this whole business the generic formula cannot supply. Its value
-depends on how far each stretch actually runs — on $\ln L$, which an infinite
-limit has thrown away — so it is the pole's own finite part, and what survives
+depends on how far each stretch actually runs - on $\ln L$, which an infinite
+limit has thrown away - so it is the pole's own finite part, and what survives
 against it is
 
 $$
@@ -486,7 +486,7 @@ so its $R$ is known exactly, and near the band centre it behaves like this:
 Two things to read off it. $R$ tends to a finite limit rather than to zero, all of
 which comes from the terms a quadrature computes: the $S \ast S$ pairs colliding at
 the band centre have already taken their own share away. And the approach to that
-limit goes as $d^2\ln d$ — a ratio steady to two digits over three decades — which is
+limit goes as $d^2\ln d$ - a ratio steady to two digits over three decades - which is
 exactly the subleading term the exponent ceiling discards, $C^1$ with a second
 derivative that diverges logarithmically, and mild enough that the fit still reaches
 $8 \times 10^{-13}$.
@@ -500,21 +500,21 @@ Wherever a genuine divergence sits, $R$ is still not a number *at* the point: th
 convolution and the term subtracted from it are both infinite there, and only the
 limit exists. That is why the Chebyshev nodes lie strictly inside each panel. A
 panel boundary sits on every singular point, and the fit never asks what $R$ is at
-one — it asks either side, and the derived constant is what makes the two answers
+one - it asks either side, and the derived constant is what makes the two answers
 agree.
 
 ## Does it close?
 
 Convolving two terms of the family produces terms of the family: the exponent goes
 to $r_1 + r_2 + 1$ and the logarithmic degree to at most $m_1 + m_2 + 1$. So the
-closed form above is not just enough for the models in this crate — it is enough
+closed form above is not just enough for the models in this crate - it is enough
 for anything they generate under repeated convolution.
 
 Better, the exponents form an additive semigroup. Writing $\sigma = r + 1 > 0$ for
 the margin a single term keeps against non-integrability, convolution is simply
 $\sigma = \sigma_1 + \sigma_2$. Every seed in the lattice models has $\sigma$ a
-half-integer — chain edges at $\tfrac12$, logarithms and band-edge constants at $1$,
-semicircle and Bethe edges at $\tfrac32$, Dirac and band-touching points at $2$ — so
+half-integer - chain edges at $\tfrac12$, logarithms and band-edge constants at $1$,
+semicircle and Bethe edges at $\tfrac32$, Dirac and band-touching points at $2$ - so
 every convolution of lattice models lands on $r \in \tfrac12\mathbb{Z}$. And since
 $\sigma$ is strictly positive and additive,
 after finitely many convolutions every term passes any fixed exponent ceiling.
@@ -531,7 +531,7 @@ whose van Hove coefficients are known in closed form.
 | Quantity | Known | Derived agrees to |
 | -------- | ----- | ----------------- |
 | square lattice peak, chain $\ast$ chain | $-1/2\pi^2 t$ | the last bit |
-| chain $\ast$ chain across the band, against [`models::square()`] | — | $8 \times 10^{-12}$ |
+| chain $\ast$ chain across the band, against [`models::square()`] | - | $8 \times 10^{-12}$ |
 | simple cubic band edge | $1/4\pi^2 t^{3/2}$ | $5 \times 10^{-8}$ |
 | simple cubic saddle | $-3/4\pi^2 t^{3/2}$ | $2 \times 10^{-8}$ |
 | simple cubic $\mu_2, \mu_4, \mu_6$ | $6t^2,\ 90t^4,\ 1860t^6$ | $2 \times 10^{-11}$ |
@@ -543,13 +543,13 @@ a square root sitting on a constant takes two samples to separate, and that is w
 costs them.
 
 None of these coefficients is written anywhere in the library.
-[`models::simple_cubic()`] is one line — it convolves a chain with a square
+[`models::simple_cubic()`] is one line - it convolves a chain with a square
 lattice. Everything else is a consequence of the algebra above.
 
 ### The one pairing left alone
 
 A constant against a constant is not derived. That product is $R_A \ast R_B$,
-which leaves a kink going as $|\Delta|$ or milder — and $|\Delta|$ is a polynomial
+which leaves a kink going as $|\Delta|$ or milder - and $|\Delta|$ is a polynomial
 either side of the panel boundary it sits on, which is where every singular point
 of the result puts one. The interpolation fits it exactly. There is nothing to
 gain.
@@ -559,12 +559,12 @@ same frequency, one for each way of matching them up, and the local form at a ba
 edge is not local: it is the value everything else takes there, which for a box is
 the whole box. Each pair would then compute the entire convolution rather than a
 piece of it, and the two added together would claim the kink twice. No choice of
-coefficient repairs that — the ambiguity is in the pairing, not the arithmetic.
+coefficient repairs that - the ambiguity is in the pairing, not the arithmetic.
 
 Excluding the product removes the case rather than patching it. Two sharp-edged
 boxes have no singular parts at all, so no pair forms, nothing is derived at any
 of the three frequencies, and their triangle comes out of the regular part exactly
-— the fit reaching $3 \times 10^{-15}$, which is rounding rather than a limit.
+- the fit reaching $3 \times 10^{-15}$, which is rounding rather than a limit.
 Anything with a singular part on one side or the other is derived as usual, which
 is how the simple cubic gets a coefficient at a band edge where the square lattice
 merely stops.

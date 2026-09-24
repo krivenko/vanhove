@@ -32,8 +32,7 @@ use crate::singularity::{Singularity, Strength};
 ///
 /// A prose account of the splitting of a spectral function into discrete, regular and
 /// singular parts, of what [`SpectralFunction::integrate()`] does with it, and of how
-/// [`SpectralFunction::conv()`] derives the singular structure of a convolution rather
-/// than being told it.
+/// [`SpectralFunction::conv()`] derives the singular structure of a convolution.
 #[doc = include_str!("../doc/theory.md")]
 pub mod theory {}
 
