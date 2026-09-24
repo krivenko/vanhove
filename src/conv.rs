@@ -233,8 +233,9 @@ const MAX_DERIVED_EXPONENT: f64 = 2.0;
 
 /// Terms of $T_1 \ast T_2$ at $\Omega_1 + \Omega_2$.
 ///
-/// The result spans $|\Delta|^r \ln^m|\Delta|$ for $m$ up to $m_1 + m_2$, or one higher
-/// where $r$ is a whole number and the pole of $\Gamma(-r)$ trades a finite part for a
+/// The result spans $|\Delta|^{\rho} \ln^m|\Delta|$ for $m$ up to $m_1 + m_2$, or one
+/// higher where $\rho$ is a whole number and the pole of $\Gamma(-\rho)$ trades a finite
+/// part for a
 /// logarithm. Each coefficient is the three stretches added together with the sides they
 /// draw on:
 /// $$
@@ -248,7 +249,7 @@ const MAX_DERIVED_EXPONENT: f64 = 2.0;
 /// goes to the regular part vanishes at the point. A singular part met with the other
 /// factor's local constant has no such value - the truth there is
 /// $\int S_p(\nu) R(\Omega_1+\Omega_2-\nu)d\nu$ rather than $c \int S_p$ - and derives
-/// the $|\Delta|^r$ family alone.
+/// the $|\Delta|^{\rho}$ family alone.
 ///
 /// Past `MAX_DERIVED_EXPONENT` the family is left to the interpolation and the constant
 /// is all that comes back, so nothing at all comes back only where every coefficient
@@ -258,22 +259,22 @@ fn convolve_terms(
     t2: UnscaledAsymptTerm,
     reach: Option<Segment>,
 ) -> Vec<AsymptTerm> {
-    let r = t1.exponent + t2.exponent + 1.0;
-    // The constant is the ln^0 member of the family at r = 0 rather than a term of its
+    let rho = t1.exponent + t2.exponent + 1.0;
+    // The constant is the ln^0 member of the family at ρ = 0 rather than a term of its
     // own, both sitting at |Δ|^0. Only a pair of singular parts can reach it: one drawn
-    // against a local constant has r > 0.
+    // against a local constant has ρ > 0.
     let constant = reach.map_or(0.0, |reach| coincident_constant(t1, t2, reach));
     debug_assert!(
-        r != 0.0 || reach.is_some(),
-        "r = 0 needs two singular parts"
+        rho != 0.0 || reach.is_some(),
+        "ρ = 0 needs two singular parts"
     );
 
     let (cb1, ca1, cb2, ca2) = (t1.c_below, t1.c_above, t2.c_below, t2.c_above);
     let mut terms = Vec::new();
 
-    if r < MAX_DERIVED_EXPONENT {
-        let [mid, lo, hi] = if is_natural(r) {
-            degenerate_stretches(t1, t2, r as usize)
+    if rho < MAX_DERIVED_EXPONENT {
+        let [mid, lo, hi] = if is_natural(rho) {
+            degenerate_stretches(t1, t2, rho as usize)
         } else {
             generic_stretches(t1, t2)
         };
@@ -285,20 +286,20 @@ fn convolve_terms(
                 )
             };
             let (mut c_below, mut c_above) = combine(mid[k], lo[k], hi[k]);
-            if r == 0.0 && k == 0 {
+            if rho == 0.0 && k == 0 {
                 c_below += constant;
                 c_above += constant;
             }
             if c_below == 0.0 && c_above == 0.0 {
                 continue;
             }
-            terms.push(AsymptTerm::sided_log(r, k as u8, c_below, c_above));
+            terms.push(AsymptTerm::sided_log(rho, k as u8, c_below, c_above));
         }
     }
 
-    // Everything above vanishes at the point for r > 0, so what the pair leaves there
+    // Everything above vanishes at the point for ρ > 0, so what the pair leaves there
     // is a term of its own. It reaches both sides alike.
-    if r != 0.0 && constant != 0.0 {
+    if rho != 0.0 && constant != 0.0 {
         terms.push(AsymptTerm::power(0.0, constant));
     }
     terms
@@ -334,12 +335,12 @@ fn coincident_constant(t1: UnscaledAsymptTerm, t2: UnscaledAsymptTerm, reach: Se
     stretch(t1.c_below * t2.c_above, -reach.min()) + stretch(t1.c_above * t2.c_below, reach.max())
 }
 
-/// What the three stretches contribute to the coefficient of $|\Delta|^r\ln^m|\Delta|$,
-/// in the order middle, lower, upper, each indexed by $m$.
+/// What the three stretches contribute to the coefficient of
+/// $|\Delta|^{\rho}\ln^m|\Delta|$, in the order middle, lower, upper, each indexed by $m$.
 ///
 /// Substituting the length of the stretch out of the integral turns every logarithm into
 /// $\ln|\Delta| + \ln(\text{something of order one})$, and expanding those binomials
-/// leaves $|\Delta|^r$ times a polynomial in $\ln|\Delta|$ of degree $m_1 + m_2$. Its
+/// leaves $|\Delta|^{\rho}$ times a polynomial in $\ln|\Delta|$ of degree $m_1 + m_2$. Its
 /// coefficients are the integrals
 /// $$
 ///     \int_0^1 t^{r_1}(1-t)^{r_2}\ln^j t \ln^k(1-t)\\,dt
@@ -350,17 +351,17 @@ fn coincident_constant(t1: UnscaledAsymptTerm, t2: UnscaledAsymptTerm, reach: Se
 ///     \int_0^\infty u^{r_1}(1+u)^{r_2}\ln^j u \ln^k(1+u)\\,du
 ///         = (\partial_a - \partial_b)^j(-\partial_b)^k B(a, b)
 /// $$
-/// over an outer one, at $b = -r$: there $\ln(1+u)$ is $-\partial_b$ and $\ln u$ the
+/// over an outer one, at $b = -\rho$: there $\ln(1+u)$ is $-\partial_b$ and $\ln u$ the
 /// difference of the two, the integrand carrying $a$ in both factors.
 fn generic_stretches(t1: UnscaledAsymptTerm, t2: UnscaledAsymptTerm) -> [Vec<f64>; 3] {
     let (r1, r2) = (t1.exponent, t2.exponent);
     let (m1, m2) = (usize::from(t1.log_power), usize::from(t2.log_power));
-    let r = r1 + r2 + 1.0;
+    let rho = r1 + r2 + 1.0;
 
     // The same tables and the same combinations the stretches themselves take, so that
     // what is declared singular here and what they set aside cannot drift apart
     let outer = |ra: f64, ma: usize, mb: usize| {
-        outer_combine(&beta_derivatives(ra + 1.0, -r, ma, ma + mb), ma, mb, &0.0)
+        outer_combine(&beta_derivatives(ra + 1.0, -rho, ma, ma + mb), ma, mb, &0.0)
     };
     [
         middle_coefficients(r1, m1, r2, m2),
@@ -370,15 +371,15 @@ fn generic_stretches(t1: UnscaledAsymptTerm, t2: UnscaledAsymptTerm) -> [Vec<f64
 }
 
 /// What the middle stretch contributes to the coefficient of
-/// $|\Delta|^r\ln^m|\Delta|$, indexed by $m$.
+/// $|\Delta|^{\rho}\ln^m|\Delta|$, indexed by $m$.
 ///
-/// $a$ and $b$ are both positive whatever $r$ comes to, so this is the one stretch that
-/// never meets a pole, and it is used at a whole-number $r$ unchanged.
+/// $a$ and $b$ are both positive whatever $\rho$ comes to, so this is the one stretch
+/// that never meets a pole, and it is used at a whole-number $\rho$ unchanged.
 fn middle_coefficients(r1: f64, m1: usize, r2: f64, m2: usize) -> Vec<f64> {
     middle_combine(&beta_derivatives(r1 + 1.0, r2 + 1.0, m1, m2), m1, m2)
 }
 
-/// What the three stretches contribute where $r$ is a non-negative integer $n$.
+/// What the three stretches contribute where $\rho$ is a non-negative integer $n$.
 ///
 /// $\Delta^n$ is analytic, and the outer stretches no longer converge: their integrands
 /// go as $u^{n-1}$ at large $u$, so one term of the expansion of $(1+1/u)^{r_2}$
@@ -387,7 +388,7 @@ fn middle_coefficients(r1: f64, m1: usize, r2: f64, m2: usize) -> Vec<f64> {
 /// the closed form.
 ///
 /// So a convolution gains a logarithm exactly where the generic formula loses one to a
-/// pole of $\Gamma(-r)$. Two locally constant factors are the case $r_1 = r_2 = 0$,
+/// pole of $\Gamma(-\rho)$. Two locally constant factors are the case $r_1 = r_2 = 0$,
 /// $n = 1$, where the binomials ask for more than they have and vanish: that is why two
 /// smooth constants convolve into no logarithm at all, and why a van Hove saddle in
 /// three dimensions is a square root rather than a peak.
@@ -414,7 +415,7 @@ fn degenerate_stretches(t1: UnscaledAsymptTerm, t2: UnscaledAsymptTerm, n: usize
     ]
 }
 
-/// What an outer stretch contributes to the logarithms at a whole-number $r$, indexed by
+/// What an outer stretch contributes to the logarithms at a whole-number $\rho$, indexed by
 /// the power of $\ln|\Delta|$.
 ///
 /// The stretch integrates over the factor whose exponent is `r_own` and sees the other
@@ -423,15 +424,15 @@ fn degenerate_stretches(t1: UnscaledAsymptTerm, t2: UnscaledAsymptTerm, n: usize
 /// $r_{own} + r_{other} + 1$.
 ///
 /// At a whole number the generic formula loses its finite parts to a pole of
-/// $\Gamma(-r)$, but not its content: writing $r = n + \epsilon$ makes
-/// $|\Delta|^r = |\Delta|^n e^{\epsilon\ln|\Delta|}$, so a pole of order $p$ meets
+/// $\Gamma(-\rho)$, but not its content: writing $\rho = n + \epsilon$ makes
+/// $|\Delta|^{\rho} = |\Delta|^n e^{\epsilon\ln|\Delta|}$, so a pole of order $p$ meets
 /// $\epsilon^p \ln^p|\Delta|/p!$ and leaves a logarithm behind. What survives is
 /// $$
 ///     \sum_m \ln^m|\Delta| \sum_p \frac{(X_m)_{-p}}{p!} \ln^p|\Delta|,
 /// $$
 /// the $(X_m)_{-p}$ being the Laurent coefficients of the generic answer, which
 /// [`beta_derivatives_laurent()`] supplies about $b = -n + \epsilon$ - read here at
-/// $-\epsilon$, $b$ being $-r$.
+/// $-\epsilon$, $b$ being $-\rho$.
 ///
 /// The $\ln^0$ coefficient comes back as the $\epsilon^0$ part alone. What goes with it
 /// is the stretch's own length, through the truncation the pole cancels against, and
@@ -858,7 +859,7 @@ mod tests {
     }
 
     /// The van Hove logarithm of the square lattice, which nothing in the library is
-    /// told: it falls out of two inverse square roots meeting at $r = 0$.
+    /// told: it falls out of two inverse square roots meeting at $\rho = 0$.
     #[test]
     fn the_square_lattice_logarithm_is_derived() {
         let t = 1.0f64;
@@ -872,7 +873,7 @@ mod tests {
             max_relative = 1e-11
         );
 
-        // The band edges meet at r = 0 too, and what the pair leaves there is a
+        // The band edges meet at ρ = 0 too, and what the pair leaves there is a
         // constant: the step the square lattice band edge really is, 1/(4πt). Only one
         // side of each edge lies inside the band, and the other reaches nothing.
         for position in [-4.0f64, 4.0] {
