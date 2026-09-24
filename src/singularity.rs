@@ -177,10 +177,26 @@ impl Singularity {
             scale > 0.0 && scale.is_finite(),
             "singularity scale must be positive and finite"
         );
+        // Terms of one exponent and one power of the logarithm are one term, their
+        // coefficients added. A convolution derives the same shape from several pairs
+        // meeting at one frequency, and reading them apart is arithmetic for nothing.
+        let mut merged: Vec<AsymptTerm> = Vec::with_capacity(terms.len());
+        for t in terms {
+            match merged
+                .iter_mut()
+                .find(|m| m.exponent == t.exponent && m.log_power == t.log_power)
+            {
+                Some(m) => {
+                    m.c_below += t.c_below;
+                    m.c_above += t.c_above;
+                }
+                None => merged.push(t),
+            }
+        }
         Singularity {
             position,
             scale,
-            terms: terms.into_boxed_slice(),
+            terms: merged.into_boxed_slice(),
         }
     }
 
