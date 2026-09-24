@@ -167,6 +167,24 @@ pub fn binomials(n: usize) -> Vec<f64> {
     c_row
 }
 
+/// Rectangular table of numbers, indexed by row and then by column.
+pub type Table = Vec<Vec<f64>>;
+
+/// Elementwise difference of two tables.
+#[allow(dead_code)]
+pub fn subtract_tables(x: &Table, y: &Table) -> Table {
+    x.iter()
+        .zip(y)
+        .map(|(rx, ry)| rx.iter().zip(ry).map(|(a, b)| a - b).collect())
+        .collect()
+}
+
+/// A table with every entry turned over.
+#[allow(dead_code)]
+pub fn negate_table(x: &Table) -> Table {
+    x.iter().map(|r| r.iter().map(|v| -v).collect()).collect()
+}
+
 /// $(-1)^n$.
 #[allow(dead_code)]
 pub fn alternating_sign(n: usize) -> f64 {
