@@ -279,7 +279,7 @@ C^+_k = c_1^+ c_2^+ X^{\mathrm{mid}}_k
 $$
 
 with $C^-_k$ the same with every sign flipped, and the term itself
-$C^{\pm}_k |\Delta|^r \ln^k|\Delta|$, where $r = r_1 + r_2 + 1$. Scaling the length
+$C^{\pm}_k |\Delta|^{\rho} \ln^k|\Delta|$, where $\rho = r_1 + r_2 + 1$. Scaling the length
 of a stretch out of the integral turns every logarithm into $\ln|\Delta|$ plus the
 logarithm of something of order one, and expanding those binomials leaves a
 *polynomial* in $\ln|\Delta|$ of degree $m_1 + m_2$. Its coefficients are Beta
@@ -297,7 +297,7 @@ $$
     = (\partial_\alpha - \partial_\gamma)^a (-\partial_\gamma)^b B(\alpha, \gamma)
 $$
 
-over an outer one, at $\alpha = r_1 + 1$, $\beta = r_2 + 1$ and $\gamma = -r$.
+over an outer one, at $\alpha = r_1 + 1$, $\beta = r_2 + 1$ and $\gamma = -\rho$.
 
 Written that way the outer integral runs to infinity, but the stretch it stands
 for does not: it stops where the support does, a finite distance $L$ from the
@@ -310,7 +310,7 @@ $$
 \qquad a = r_1+1,\quad b = -\rho,\quad z = \frac{L}{\Delta+L},
 $$
 
-with $\rho = r + 1$, and the logarithms come out of the same two substitutions:
+and the logarithms come out of the same two substitutions:
 $\ln s = \ln\Delta + \ln t - \ln(1-t)$ and $\ln(\Delta+s) = \ln\Delta - \ln(1-t)$,
 so expanding both binomially leaves nothing but entries of the derivative table
 $\partial_a^j\partial_b^k B_z(a,b)$. The middle stretch is the same story with
@@ -380,7 +380,7 @@ series converges fastest where the accuracy matters most.
 ## When the exponent is a whole number
 
 The reflection has a catch, and it is the interesting case rather than an awkward
-one. $b = -\rho$, so $b$ is a non-positive integer exactly when $r$ is a whole
+one. $b = -\rho$, so $b$ is a non-positive integer exactly when $\rho$ is a whole
 number $n$ — and there both halves are infinite. $\Gamma(b)$ has a pole, and so
 does the one term of the series whose denominator $b + n$ vanishes.
 
@@ -396,14 +396,14 @@ $$
 
 So the poles cancel between the halves while the logarithm comes from $\Delta^{\rho}
 B(a,b)$ alone. **A convolution gains a logarithm exactly where the generic formula
-loses one to a pole of $\Gamma(-r)$**, with
+loses one to a pole of $\Gamma(-\rho)$**, with
 
 $$
 X^{\mathrm{lo}}_1 = -\binom{r_2}{n}, \qquad X^{\mathrm{hi}}_1 = -\binom{r_1}{n}.
 $$
 
 This is where the physics is. Two inverse square roots — the band edges of a
-linear chain — meet at $r = 0$, and the logarithm that comes out is the van Hove
+linear chain — meet at $\rho = 0$, and the logarithm that comes out is the van Hove
 singularity at the centre of the square lattice band. The library is never told
 this; it falls out of the two binomials.
 
@@ -467,7 +467,7 @@ R(\omega) = (C_A \ast C_B)(\omega) - \sum_p S^{\mathrm{derived}}_p(\omega).
 $$
 
 What lands in $R$ from a pair is therefore its subleading structure and nothing
-else: only the leading local form is derived, and anything with $r \geq 2$ is
+else: only the leading local form is derived, and anything with $\rho \geq 2$ is
 discarded as smooth enough. The constant is not among the leftovers. Every pair of
 singular parts derives the one it leaves at $\Omega_p + \Omega_q$, so its share of
 $R$ goes to *zero* there rather than to a step the two panels would straddle. What
@@ -477,19 +477,24 @@ continuous across it anyway.
 Those leftovers are visible. A linear chain against itself is the square lattice,
 so its $R$ is known exactly, and near the band centre it behaves like this:
 
-| $d$ | $R(+d)$ | $R(-d)$ | $[R(d) - R(0^+)] / (d^2\ln d)$ |
+| $d$ | $R(+d)$ | $R(-d)$ | $\dfrac{R(d) - R(d/10)}{d^2\ln d - (d/10)^2\ln(d/10)}$ |
 | --- | --- | --- | --- |
-| $10^{-2}$ | $-0.21614760404361$ | $-0.21614760404361$ | $-0.001096$ |
-| $10^{-3}$ | $-0.21614810201956$ | $-0.21614810201956$ | $-0.000967$ |
-| $10^{-4}$ | $-0.21614810880399$ | $-0.21614810880399$ | $+0.001101$ |
+| $10^{-2}$ | $-0.21614760404361$ | $-0.21614760404361$ | $-0.001098$ |
+| $10^{-3}$ | $-0.21614810201956$ | $-0.21614810201956$ | $-0.000995$ |
+| $10^{-4}$ | $-0.21614810880399$ | $-0.21614810880399$ | $-0.000966$ |
 
 Two things to read off it. $R$ tends to a finite limit rather than to zero, all of
 which comes from the terms a quadrature computes: the $S \ast S$ pairs colliding at
-the band centre have already taken their own share away. The approach to that limit
-goes as $d^2\ln d$ — a ratio of the same order over three decades, the last one
-running out of digits against a limit of order $10^{-1}$ — which is exactly the
-subleading term the exponent ceiling discards, $C^1$ with a second derivative that
-diverges logarithmically, and mild enough that the fit still reaches $10^{-13}$.
+the band centre have already taken their own share away. And the approach to that
+limit goes as $d^2\ln d$ — a ratio steady to two digits over three decades — which is
+exactly the subleading term the exponent ceiling discards, $C^1$ with a second
+derivative that diverges logarithmically, and mild enough that the fit still reaches
+$8 \times 10^{-13}$.
+
+The last column differences two samples rather than measuring each against $R(0^+)$.
+The limit is not known independently, and estimating it costs more accuracy than the
+departure from it has to spare: at $d = 10^{-4}$ that departure is a part in $10^{10}$
+of $R$ itself, where differencing cancels the unknown and leaves the law standing.
 
 Wherever a genuine divergence sits, $R$ is still not a number *at* the point: the
 convolution and the term subtracted from it are both infinite there, and only the
@@ -505,12 +510,13 @@ to $r_1 + r_2 + 1$ and the logarithmic degree to at most $m_1 + m_2 + 1$. So the
 closed form above is not just enough for the models in this crate — it is enough
 for anything they generate under repeated convolution.
 
-Better, the exponents form an additive semigroup. Writing $\rho = r + 1 > 0$,
-convolution is simply $\rho = \rho_1 + \rho_2$. Every seed in the lattice models
-has $\rho$ a half-integer — chain edges at $\tfrac12$, logarithms and band-edge
-constants at $1$, semicircle and Bethe edges at $\tfrac32$, Dirac and
-band-touching points at $2$ — so every convolution of lattice models lands on
-$r \in \tfrac12\mathbb{Z}$. And since $\rho$ is strictly positive and additive,
+Better, the exponents form an additive semigroup. Writing $\sigma = r + 1 > 0$ for
+the margin a single term keeps against non-integrability, convolution is simply
+$\sigma = \sigma_1 + \sigma_2$. Every seed in the lattice models has $\sigma$ a
+half-integer — chain edges at $\tfrac12$, logarithms and band-edge constants at $1$,
+semicircle and Bethe edges at $\tfrac32$, Dirac and band-touching points at $2$ — so
+every convolution of lattice models lands on $r \in \tfrac12\mathbb{Z}$. And since
+$\sigma$ is strictly positive and additive,
 after finitely many convolutions every term passes any fixed exponent ceiling.
 Discarding the smooth ones is not a heuristic; the truncated algebra really is
 finite.
@@ -522,13 +528,19 @@ is the square lattice, since the dispersion is a sum of two independent
 one-dimensional bands; a chain against a square lattice is the simple cubic band,
 whose van Hove coefficients are known in closed form.
 
-| Quantity | Derived | Known |
-| -------- | ------- | ----- |
-| square lattice peak, chain $\ast$ chain | $-0.050660591821$ | $-1/2\pi^2 t$ |
-| band against [`models::square()`], worst relative | $3 \times 10^{-12}$ | — |
-| simple cubic band edge | $+0.025330295844$ | $1/4\pi^2 t^{3/2}$ |
-| simple cubic saddle | $-0.075990887490$ | $-3/4\pi^2 t^{3/2}$ |
-| simple cubic $\mu_2, \mu_4, \mu_6$ | $8 \times 10^{-13}$ | $6t^2,\ 90t^4,\ 1860t^6$ |
+| Quantity | Known | Derived agrees to |
+| -------- | ----- | ----------------- |
+| square lattice peak, chain $\ast$ chain | $-1/2\pi^2 t$ | the last bit |
+| chain $\ast$ chain across the band, against [`models::square()`] | — | $8 \times 10^{-12}$ |
+| simple cubic band edge | $1/4\pi^2 t^{3/2}$ | $5 \times 10^{-8}$ |
+| simple cubic saddle | $-3/4\pi^2 t^{3/2}$ | $2 \times 10^{-8}$ |
+| simple cubic $\mu_2, \mu_4, \mu_6$ | $6t^2,\ 90t^4,\ 1860t^6$ | $2 \times 10^{-11}$ |
+
+The peak is exact because the derived term *is* $c\ln|\Delta|$, so reading $c$ off two
+samples returns it unchanged. The two three-dimensional points are read off a square
+root instead, and there the eight digits are the reading rather than the coefficient:
+a square root sitting on a constant takes two samples to separate, and that is what
+costs them.
 
 None of these coefficients is written anywhere in the library.
 [`models::simple_cubic()`] is one line — it convolves a chain with a square
@@ -552,7 +564,7 @@ coefficient repairs that — the ambiguity is in the pairing, not the arithmetic
 Excluding the product removes the case rather than patching it. Two sharp-edged
 boxes have no singular parts at all, so no pair forms, nothing is derived at any
 of the three frequencies, and their triangle comes out of the regular part exactly
-— to $10^{-12}$, which is the tolerance asked for rather than a limit reached.
+— the fit reaching $3 \times 10^{-15}$, which is rounding rather than a limit.
 Anything with a singular part on one side or the other is derived as usual, which
 is how the simple cubic gets a coefficient at a band edge where the square lattice
 merely stops.
