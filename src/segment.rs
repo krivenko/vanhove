@@ -4,8 +4,8 @@ use std::ops::Add;
 
 /// Segment of the frequency axis, $[\omega_{min}, \omega_{max}]$.
 ///
-/// A segment of zero length is a valid one, a discrete spectral function of a single
-/// resonance being supported on exactly that.
+/// A segment of zero length is valid, since it is the support of a discrete spectral
+/// function of a single resonance.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Segment {
     min: f64,
@@ -64,8 +64,7 @@ impl Segment {
         0.5 * self.min + 0.5 * self.max
     }
 
-    /// Image of the segment under the reflection $\nu \mapsto \omega - \nu$, which is
-    /// the one a convolution integral runs over.
+    /// Image of the segment under the reflection $\nu \mapsto \omega - \nu$.
     pub fn mirrored(&self, omega: f64) -> Segment {
         Segment {
             min: omega - self.max,
@@ -81,10 +80,10 @@ impl Segment {
         }
     }
 
-    /// The parts of the segment below and above `omega`, which must lie within it.
+    /// The parts of the segment below and above `omega`.
     ///
-    /// The two share the frequency they are split at, so a split at an end of the
-    /// segment leaves a degenerate part rather than an empty one.
+    /// `omega` must lie within the segment. The two parts share the frequency they are
+    /// split at, so a split at an end of the segment leaves a degenerate part.
     pub fn split_at(&self, omega: f64) -> (Segment, Segment) {
         assert!(
             self.contains(omega),
@@ -121,9 +120,6 @@ impl Segment {
 }
 
 /// Sum of two segments, $[\omega^1_{min} + \omega^2_{min}, \omega^1_{max} + \omega^2_{max}]$.
-///
-/// A convolution is supported on the sum of the supports of its two factors, each
-/// frequency of the one reached from every frequency of the other.
 impl Add for Segment {
     type Output = Segment;
 
