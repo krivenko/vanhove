@@ -145,9 +145,7 @@ pub fn bilby_integrate<F: Fn(f64) -> f64>(
 
 /// Call [`bilby_integrate`] and return zero where it refuses the request.
 ///
-/// Refusal is about the request rather than the integrand: a tolerance that is no
-/// number, an interval that is no interval. An integrand the quadrature cannot resolve
-/// is not refused at all - it comes back as a value, only a less accurate one.
+/// Refusal is about the request: a tolerance that is not positive or an invalid interval.
 pub fn bilby_integrate_or_0<F: Fn(f64) -> f64>(f: F, segment: Segment, tol: f64) -> f64 {
     bilby_integrate(f, segment, tol).map_or(0.0, |r| r.value)
 }
@@ -155,7 +153,7 @@ pub fn bilby_integrate_or_0<F: Fn(f64) -> f64>(f: F, segment: Segment, tol: f64)
 /// The whole row $\binom{n}{0}, \binom{n}{1}, \ldots, \binom{n}{n}$.
 ///
 /// Each coefficient follows from the one before it, which is cheaper than asking for
-/// them one at a time and is how they are wanted wherever a binomial expansion is
+/// them one at a time and is how they are needed wherever a binomial expansion is
 /// summed over.
 pub fn binomials(n: usize) -> Vec<f64> {
     let mut c_row = vec![1.0; n + 1];
@@ -176,7 +174,7 @@ pub fn subtract_tables(x: &Table, y: &Table) -> Table {
         .collect()
 }
 
-/// A table with every entry turned over.
+/// A table with every entry negated.
 pub fn negate_table(x: &Table) -> Table {
     x.iter().map(|r| r.iter().map(|v| -v).collect()).collect()
 }
@@ -186,18 +184,17 @@ pub fn alternating_sign(n: usize) -> f64 {
     if n.is_multiple_of(2) { 1.0 } else { -1.0 }
 }
 
-/// Whether `x` is one of $0, 1, 2, \ldots$
+/// Whether `x` is one of $0, 1, 2, \ldots$.
 pub fn is_natural(x: f64) -> bool {
     x >= 0.0 && x.fract() == 0.0
 }
 
 /// Polygamma function $\psi^{(n)}(x)$, the $n$-th derivative of the digamma function.
 ///
-/// Diverges at the non-positive integers, where $\Gamma$ has its poles.
+/// Diverges at the non-positive integers, where $\Gamma(x)$ has its poles.
 ///
 /// The recurrence $\psi^{(n)}(x) = \psi^{(n)}(x+1) - (-1)^n n!\\,x^{-n-1}$ walks the
-/// argument up to where the asymptotic series converges, which is what carries the
-/// negative arguments: the reflection formula is never needed.
+/// argument $x$ up to where the asymptotic series converges.
 pub fn polygamma(n: u32, x: f64) -> f64 {
     /// $B_{2k}$ for $k = 1, 2, \ldots$
     const BERNOULLI: [f64; 8] = [
@@ -284,9 +281,7 @@ mod tests {
     fn pow_kind() {
         use util::PowKind;
 
-        // Every shortcut agrees with powf() to within a few ulps. It is not bitwise
-        // agreement: powi() multiplies repeatedly and InvSqrt rounds twice, while
-        // powf() is correctly rounded.
+        // Every shortcut agrees with powf() to within a few ulps.
         for r in [0.0f64, 1.0, 0.5, -0.5, 3.0, -7.0, 4.0, 2.5, -0.25] {
             let kind = PowKind::of(r);
             for u in [0.0f64, 1e-8, 0.25, 1.0, 7.5] {
@@ -303,7 +298,7 @@ mod tests {
 
         // Integer exponents beyond the powi() range fall back on powf()
         assert!(matches!(PowKind::of(32.0), PowKind::Powi(32)));
-        assert!(matches!(PowKind::of(33.0), PowKind::Powf(_)));
+        assert!(matches!(PowKind::of(33.0), PowKind::Powf(33.0)));
     }
 
     #[test]
@@ -394,7 +389,7 @@ mod tests {
         let point = Segment::new(1.0, 1.0);
         assert_eq!(util::bilby_integrate_or_0(f64::exp, point, 1e-12), 0.0);
 
-        // Where the quadrature refuses the request there is no value to carry back
+        // Where the quadrature refuses the request there is no value to return
         let unit = Segment::new(0.0, 1.0);
         assert_eq!(util::bilby_integrate_or_0(f64::exp, unit, -1.0), 0.0);
     }
@@ -439,8 +434,8 @@ mod tests {
 
     #[test]
     fn polygamma() {
+        use std::f64::consts::EULER_GAMMA as GAMMA;
         use std::f64::consts::PI;
-        const GAMMA: f64 = 0.577_215_664_901_532_9;
 
         // ψ(1) = -γ, ψ(1/2) = -γ - 2ln2, and the recurrence ψ(x+1) = ψ(x) + 1/x
         assert_relative_eq!(util::polygamma(0, 1.0), -GAMMA, max_relative = 1e-13);
@@ -473,8 +468,8 @@ mod tests {
             max_relative = 1e-13
         );
 
-        // Walking the argument up carries the negative ones, so no reflection formula
-        // is needed: ψ(-1/2) = ψ(1/2) + 2
+        // Walking the argument up covers the negative values,
+        // so no reflection formula is needed: ψ(-1/2) = ψ(1/2) + 2
         assert_relative_eq!(
             util::polygamma(0, -0.5),
             2.0 - GAMMA - 2.0 * 2f64.ln(),
