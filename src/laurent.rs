@@ -1,8 +1,8 @@
 //! Truncated Laurent series in a small parameter.
 //!
-//! Arithmetic for series carrying a pole of finite order, used where two divergences are
+//! Arithmetic for series around a pole of finite order, used where two divergences are
 //! known to cancel and the finite part is what is wanted. Everything is truncated to a
-//! fixed window of powers, so a product loses whatever reaches past it.
+//! fixed window of powers, so a product loses the powers past it.
 
 use std::ops::{Add, AddAssign, Mul, Neg, Sub};
 
@@ -10,7 +10,9 @@ use std::ops::{Add, AddAssign, Mul, Neg, Sub};
 /// through $\epsilon^{w}$.
 #[derive(Clone)]
 pub struct Laurent {
+    /// The powers run from $-w$ to $w$, so the window holds $2w+1$ of them.
     w: usize,
+    /// Coefficients from $\epsilon^{-w}$ up, so $\epsilon^k$ sits at `c[k + w]`.
     c: Vec<f64>,
 }
 
@@ -22,20 +24,21 @@ impl Laurent {
         }
     }
 
-    /// A series with no pole, from the coefficients of $\epsilon^0, \epsilon^1, \ldots$
+    /// A series with no pole, from the coefficients of $\epsilon^0, \epsilon^1, \ldots$.
     ///
-    /// Takes the $w+1$ of them the window has room for and needs at least that many.
-    /// A pole applied afterwards shifts the window down, and the top coefficient it lands
-    /// on would have come from $\epsilon^{w+1}$ - never in range, so it stays zero.
-    /// Whatever divides a series is therefore best applied last, once the analytic factors
-    /// have been taken at the full width.
+    /// Takes the $w+1$ of them from `taylor`, which must contain at least that many.
     pub fn from_taylor(w: usize, taylor: &[f64]) -> Laurent {
         let mut s = Laurent::zero(w);
         s.c[w..].copy_from_slice(&taylor[..w + 1]);
         s
     }
 
-    /// $1/(n + \epsilon)$.
+    /// Series for $1/(n + \epsilon)$.
+    ///
+    /// At $n = 0$ it is the bare pole $1/\epsilon$, and multiplying by that shifts the
+    /// window down: the top coefficient of the product would have to come from
+    /// $\epsilon^{w+1}$, never in range, so it stays zero. Apply a divisor last, once
+    /// the analytic factors have been taken at the full width.
     pub fn reciprocal_linear(w: usize, n: isize) -> Laurent {
         if n == 0 {
             let mut out = Laurent::zero(w);
@@ -53,7 +56,7 @@ impl Laurent {
         Laurent::from_taylor(w, &taylor)
     }
 
-    /// Where $\epsilon^k$ sits in `c`, absent where the window does not reach that far.
+    /// Where $\epsilon^k$ sits in `c`, absent if the window does not reach that far.
     fn slot(&self, k: isize) -> Option<usize> {
         let i = k + self.w as isize;
         (i >= 0 && (i as usize) < self.c.len()).then_some(i as usize)
@@ -97,9 +100,7 @@ impl Laurent {
     }
 }
 
-/// Arithmetic on two series assumes they share a window. They always do - every series
-/// in one calculation is built to the same width - and the assertion is there because
-/// the failure would otherwise be silent, `zip` stopping at the shorter of the two.
+/// Arithmetic on two series assumes they share a window.
 macro_rules! same_window {
     ($a:expr, $b:expr) => {
         debug_assert_eq!($a.w, $b.w, "Laurent series of unequal windows");
@@ -157,7 +158,7 @@ impl Sub<&Laurent> for &Laurent {
     }
 }
 
-/// The product, truncated back to the window the two operands share.
+/// The product, truncated back to the power window the two operands share.
 impl Mul<&Laurent> for &Laurent {
     type Output = Laurent;
     fn mul(self, other: &Laurent) -> Laurent {
@@ -200,30 +201,32 @@ mod tests {
     #[test]
     fn arithmetic() {
         let w = 2;
-        // ε^-1 + 2 + 3ε, and 1 + ε
+        // ε^-1 + 2 + 3ε
         let mut a = Laurent::zero(w);
         (a.c[w - 1], a.c[w], a.c[w + 1]) = (1.0, 2.0, 3.0);
+        // 1 + ε
         let b = Laurent::from_taylor(w, &[1.0, 1.0, 0.0]);
 
-        // Negation turns every power, and subtraction is addition of it
+        // Negation turns every power
         assert_eq!((-&a).at(-1), -1.0);
         assert_eq!((-&a).at(1), -3.0);
+        // Subtraction is a composition of negation and addition
         for k in -2..=2 {
             assert_eq!((&a - &b).at(k), (&a + &(-&b)).at(k));
         }
 
-        // (ε^-1 + 2 + 3ε)(1 + ε) = ε^-1 + 3 + 5ε + 3ε²
+        // (ε^-1 + 2 + 3ε)(1 + ε) = ε^-1 + 3 + 5ε + 3ε^2
         let p = &a * &b;
         assert_eq!([p.at(-1), p.at(0), p.at(1), p.at(2)], [1.0, 3.0, 5.0, 3.0]);
 
-        // A product reaching past the window is dropped rather than wrapped
+        // A product reaching past the window is dropped
         let (c, d) = (
             Laurent::from_taylor(w, &[0.0, 0.0, 1.0]),
             Laurent::from_taylor(w, &[0.0, 1.0, 0.0]),
         );
         assert!((-2..=2).all(|k| (&c * &d).at(k) == 0.0));
 
-        // Accumulating a series and its negative leaves nothing
+        // Accumulating a series and its negative leaves zero
         let mut acc = Laurent::zero(w);
         acc += &a;
         acc += &a * -1.0;
