@@ -240,10 +240,10 @@ const MAX_SERIES_TERMS: usize = 4096;
 ///
 /// The series for $B_z(a,b)$, differentiated term by term. Its two factors depend on
 /// one parameter each, so there is no Leibniz rule to apply between them: $\partial_a$
-/// reaches only $z^{a+n}/(a+n)$ and $\partial_b$ only the Pochhammer.
+/// reaches only $z^{a+n}/(a+n)$ and $\partial_b$ only the Pochhammer symbol.
 ///
-/// The Pochhammer is carried from one term to the next by [`advance_pochhammer()`]
-/// rather than recomputed, which is what keeps the summation linear in the number of
+/// The Pochhammer symbol is propagated from one term to the next by
+/// [`advance_pochhammer()`], which is what keeps the summation linear in the number of
 /// terms.
 fn inc_beta_derivatives_series(
     a: f64,
@@ -297,7 +297,7 @@ fn inc_beta_derivatives_series(
 
 /// The series of [`inc_beta_derivatives_series()`] with its first parameter at $-m + \epsilon$.
 ///
-/// Every term is finite but the one at $n = m$, whose $1/(a+n)$ is a bare $1/\epsilon$.
+/// Every term is finite but the one at $n = m$, where $1/(a+n)$ is a divergent $1/\epsilon$.
 /// Carrying the whole sum as a Laurent series keeps that pole in hand until it meets
 /// the one in the complete Beta and cancels.
 fn inc_beta_derivatives_laurent(
@@ -364,11 +364,9 @@ const TOL: f64 = 1e-17;
 /// instead of the plain reflection.
 ///
 /// The reflection subtracts two halves that each grow as $1/\epsilon$ there, and loses
-/// digits to it long before $\epsilon$ reaches zero - five of them at
-/// $\epsilon = 10^{-12}$. The other branch subtracts the two as series, where the poles
-/// cancel term by term, and is limited only by where the expansion is cut: its error
-/// goes as $\epsilon^{w+1}$. The two are worth about the same here, and the worst either
-/// does is a part in $10^{12}$.
+/// digits to it long before $\epsilon$ reaches zero - about ten at $\epsilon = 10^{-12}$
+/// against one at $10^{-4}$. The pole branch errs the other way, truncating the
+/// expansion about the integer at $\epsilon^{w+1}$, so the two cross near this width.
 const POLE_WIDTH: f64 = 1e-4;
 
 /// Whether `b` is near enough to a pole of $\Gamma$ that only the reflection as a whole
@@ -379,16 +377,14 @@ fn near_a_pole(b: f64) -> bool {
 }
 
 /// The complete beta's derivative table and the deficit's, as
-/// [`inc_beta_derivatives_split()`] hands them back.
+/// [`inc_beta_derivatives_split()`] returns them.
 pub type SplitTables = (Table, Table);
 
 /// $\partial_a^j \partial_b^k$ of $B(a,b)$, and of the deficit $B(a,b) - B_z(a,b)$ that
 /// the argument falling short of one leaves behind.
 ///
 /// Their difference is [`inc_beta_derivatives()`], but a caller separating a singular
-/// part from a regular one wants them apart: against a $\Delta^{-b}$ out front the first
-/// is what survives as $\Delta \to 0$ and the second is what stays analytic there, the
-/// two prefactors cancelling in the latter.
+/// part from a regular one wants them apart.
 ///
 /// [`None`] where `b` sits near a non-positive integer. $\Gamma(b)$ has a pole there, so
 /// both halves are infinite and only their difference is a number.
@@ -410,8 +406,7 @@ pub fn inc_beta_derivatives_split(
     let complete = beta_derivatives(a, b, j_max, k_max);
     // Past z = 1/2 the reflection already is the deficit, read transposed because
     // exchanging the parameters exchanges which derivative is which. Below it the series
-    // gives $B_z$ whole and the deficit is taken from the complete beta, far enough from
-    // the singular point that the subtraction costs nothing.
+    // gives $B_z$ whole and the deficit is taken from the complete beta.
     let deficit = if z > 0.5 {
         let reflected = inc_beta_derivatives_series(b, a, 1.0 - z, k_max, j_max, TOL);
         (0..=j_max)
@@ -429,8 +424,8 @@ pub fn inc_beta_derivatives_split(
 /// Table of $\partial_a^j \partial_b^k B_z(a,b)$ for $j \le$ `j_max` and $k \le$ `k_max`.
 ///
 /// $B_z(a,b) = \int_0^z t^{a-1}(1-t)^{b-1} dt$, with `a` positive and `b` free to be
-/// negative or a non-integer. The parameters are what is differentiated, not the
-/// argument: a logarithm under the integral is what one of these derivatives is.
+/// negative or a non-integer. The parameters are what is differentiated: each derivative
+/// introduces a power of a logarithm under the integral.
 ///
 /// The series of the section above converges for $z < 1$ and any real $b$, since $a > 0$
 /// leaves no denominator to vanish. Past $z = 1/2$ the reflection
@@ -459,15 +454,14 @@ pub fn inc_beta_derivatives(a: f64, b: f64, z: f64, j_max: usize, k_max: usize) 
     // Only the pole is left: Γ(b) has one at every non-positive integer, and so does the
     // one term of the series whose denominator b+n vanishes. Carrying each as a Laurent
     // series in ε about b = -m lets the two cancel before anything is evaluated, which
-    // is why this branch cannot hand the halves back one at a time.
+    // is why this branch cannot return the halves one at a time.
     let m = (-b).round() as usize;
     {
         let width = j_max + k_max + 3;
         let complete = beta_derivatives_laurent(a, m, j_max, k_max, width);
         let reflected = inc_beta_derivatives_laurent(m, a, 1.0 - z, k_max, j_max, width, TOL);
         // The poles cancel, so the difference is analytic and its non-negative part is
-        // the Taylor expansion of B_z about b = -m. Summing it at the ε we were given
-        // answers for that b rather than for the integer beside it.
+        // the Taylor expansion of B_z about b = -m.
         let eps = b + m as f64;
         (0..=j_max)
             .map(|j| {
@@ -599,7 +593,7 @@ mod tests {
 
     #[test]
     fn the_ends_are_the_complete_beta() {
-        // z = 1 is the complete beta, derivatives and all; z = 0 is nothing
+        // z = 1 is the complete beta, derivatives and all; z = 0 gives zero
         for &(a, b) in &[(0.5f64, 0.75f64), (1.5, 2.5), (2.0, 0.25)] {
             let whole = inc_beta_derivatives(a, b, 1.0, 2, 2);
             let complete = beta_derivatives(a, b, 2, 2);
