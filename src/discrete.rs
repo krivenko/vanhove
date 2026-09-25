@@ -16,7 +16,7 @@ pub struct Resonance {
 
 /// Discrete spectral function with a finite number of resonances,
 /// $$
-///     A(\omega) = \sum_p w_p \delta(\omega - \varepsilon_p).
+///     D(\omega) = \sum_p w_p \delta(\omega - \varepsilon_p).
 /// $$
 ///
 /// The list of resonances is sealed upon construction and is always kept in its
@@ -147,9 +147,9 @@ impl<'a> IntoIterator for &'a DiscreteSF {
     }
 }
 
-/// Merge resonances sharing the same position within an ε-sorted list, and remove
-/// the groups whose total weight is negligible. Called on a freshly sorted list, this
-/// establishes the canonical form.
+/// Merge resonances sharing the same position within an $\varepsilon$-sorted list, and
+/// remove the groups whose total weight is negligible. Called on a freshly sorted list,
+/// this establishes the canonical form.
 fn canonicalize(resonances: &mut Vec<Resonance>) {
     let (mut w, mut i) = (0, 0);
     while i < resonances.len() {
@@ -160,8 +160,7 @@ fn canonicalize(resonances: &mut Vec<Resonance>) {
             i += 1;
         }
 
-        // A lone resonance needs no summation and can only be negligible
-        // w.r.t. itself, which `total.abs() > tol * mag` never is
+        // A lone resonance needs no summation and can never be negligible
         if i == start + 1 {
             resonances[w] = resonances[start];
             w += 1;
@@ -243,7 +242,7 @@ impl DiscreteSF {
     }
 
     /// Convolution with another discrete spectral function,
-    /// $\int A(\nu) B(\omega - \nu) d\nu$.
+    /// $\int D_A(\nu) D_B(\omega - \nu) d\nu$.
     pub fn conv(&self, other: &DiscreteSF) -> DiscreteSF {
         self.iter()
             .flat_map(|a| {
@@ -357,10 +356,6 @@ mod tests {
         sf.iter().map(|r| r.weight * r.eps.powi(n)).sum()
     }
 
-    fn binomial(n: usize, k: usize) -> f64 {
-        (1..=k).map(|i| (n - k + i) as f64 / i as f64).product()
-    }
-
     #[test]
     fn conv() {
         let a = DiscreteSF::from_iter([
@@ -408,8 +403,9 @@ mod tests {
 
         // Moments obey M_n = Σ_k C(n,k) M_k^A M_{n-k}^B
         for n in 0..=4 {
+            let c_row = util::binomials(n);
             let reference: f64 = (0..=n)
-                .map(|k| binomial(n, k) * moment(&a, k as i32) * moment(&b, (n - k) as i32))
+                .map(|k| c_row[k] * moment(&a, k as i32) * moment(&b, (n - k) as i32))
                 .sum();
             assert_relative_eq!(moment(&c, n as i32), reference, epsilon = 1e-12);
         }
