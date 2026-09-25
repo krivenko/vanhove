@@ -34,9 +34,7 @@ impl AsymptTerm {
 
     /// $c^\pm u^r \ln^m u$, with a coefficient of its own on either side of $\Omega_p$.
     ///
-    /// The sides may differ in any term, a bare constant included: $S_p$ is a piece of
-    /// the splitting rather than $A(\omega)$, so a step at $\Omega_p$ is no jump in the
-    /// spectral function.
+    /// The sides may differ in any term, a bare constant included.
     pub fn sided_log(exponent: f64, log_power: u8, c_below: f64, c_above: f64) -> AsymptTerm {
         AsymptTerm::make(exponent, log_power, c_below, c_above)
     }
@@ -79,7 +77,7 @@ impl AsymptTerm {
 
 /// $\int_0^l u^r \ln^m u\\, du$, for $r > -1$.
 ///
-/// Each logarithm is integrated by parts against the one below it,
+/// Each power of the logarithm is integrated by parts against the one below it,
 /// $I_m = (l^{r+1}\ln^m l - m I_{m-1})/(r+1)$.
 pub(crate) fn power_log_integral(exponent: f64, log_power: u8, l: f64) -> f64 {
     // The side is empty when Ω_p sits at that end of the support
@@ -123,8 +121,8 @@ impl Strength {
 /// One term of a singular part written out in the distance to $\Omega_p$ itself,
 /// $c^\pm |\omega-\Omega_p|^r \ln^m|\omega-\Omega_p|$.
 ///
-/// [`Singularity::unscaled_terms()`] folds the scale in, which costs a term per
-/// logarithm.
+/// [`Singularity::unscaled_terms()`] folds the scale in, which costs a term per power
+/// of the logarithm.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct UnscaledAsymptTerm {
     /// Exponent $r$.
@@ -178,8 +176,7 @@ impl Singularity {
             "singularity scale must be positive and finite"
         );
         // Terms of one exponent and one power of the logarithm are one term, their
-        // coefficients added. A convolution derives the same shape from several pairs
-        // meeting at one frequency, and reading them apart is arithmetic for nothing.
+        // coefficients added.
         let mut merged: Vec<AsymptTerm> = Vec::with_capacity(terms.len());
         for t in terms {
             match merged
@@ -204,10 +201,10 @@ impl Singularity {
     ///
     /// Folding the scale in costs terms: with $\ln u = \ln|\omega-\Omega_p| - \ln s$,
     /// $$
-    ///     c u^r \ln^m u = c s^{-r} \sum_j \binom{m}{j} (-\ln s)^j
+    ///     c u^r \ln^m u = c s^{-r} \sum_{j=0}^m \binom{m}{j} (-\ln s)^j
     ///         |\omega-\Omega_p|^r \ln^{m-j}|\omega-\Omega_p|,
     /// $$
-    /// so one term with $m$ logarithms leaves $m+1$ behind.
+    /// so one term with the $m$-th power of the logarithm leaves $m+1$ terms behind.
     pub(crate) fn unscaled_terms(&self) -> Vec<UnscaledAsymptTerm> {
         let ln_scale = self.scale.ln();
         let mut form = Vec::with_capacity(self.terms.len());
@@ -256,8 +253,8 @@ impl Singularity {
         self.terms.iter().map(|t| t.value(d < 0.0, u)).sum()
     }
 
-    /// $\int_{\omega_{min}}^{\omega_{max}} S_p(\omega)d\omega$ over `support`, in closed
-    /// form.
+    /// $\int_{\omega_{min}}^{\omega_{max}} S_p(\omega)d\omega$ over `support`,
+    /// in closed form.
     pub fn integral(&self, support: Segment) -> f64 {
         if self.is_trivial() {
             return 0.0;
@@ -280,11 +277,13 @@ impl Singularity {
             * self.scale
     }
 
-    /// Limit of $S_p(\omega)$ at $\Omega_p$ with every divergent term dropped.
+    /// Limit of $S_p(\omega)$ at $\Omega_p$ with every divergent term dropped, taken
+    /// from above if the sides differ.
     ///
-    /// With $\ln u = \ln|\omega-\Omega_p| - \ln s$, a term of $m$ logarithms leaves
-    /// $c(-\ln s)^m$ behind and every other power of the logarithm diverges. The terms
-    /// with $r > 0$ vanish, and those with $r < 0$ do not stay finite at all.
+    /// With $\ln u = \ln|\omega-\Omega_p| - \ln s$, a term of the $m$-th power of the
+    /// logarithm leaves $c(-\ln s)^m$ behind and every other power of the logarithm
+    /// diverges. The terms with $r > 0$ vanish, and those with $r < 0$ do not stay
+    /// finite at all.
     pub fn finite_limit(&self) -> f64 {
         self.unscaled_terms()
             .into_iter()
@@ -463,8 +462,7 @@ mod tests {
         assert_eq!(sing.value(1.5), 5.0);
         assert_eq!(sing.value(1.0), 5.0);
 
-        // Each side of the integral takes its own coefficient, and what survives at
-        // Ω_p is the upper one
+        // Each side of the integral takes its own coefficient
         assert_relative_eq!(
             sing.integral(Segment::new(-1.0, 4.0)),
             3.0 * 2.0 + 5.0 * 3.0,
@@ -477,15 +475,14 @@ mod tests {
     #[test]
     fn value_at_the_singular_point() {
         // c u^r ln^m u is zero at Ω_p for r > 0, the power vanishing faster than any
-        // number of logarithms diverges. Taken literally it is 0 · (-∞)^m.
+        // power of the logarithm diverges
         for m in 0u8..=3 {
             let sing = Singularity::new(2.0, 1.0, vec![AsymptTerm::sided_log(0.5, m, 3.0, 5.0)]);
             assert_eq!(sing.value(2.0), 0.0, "m = {m}");
             assert!(sing.value(2.0 + 1e-300).abs() < 1e-140);
         }
 
-        // A term of no weight is nothing at Ω_p however fast u^r diverges, where
-        // literally it is 0 · ∞
+        // A term of no weight is nothing at Ω_p however fast u^r diverges
         for r in [-0.5f64, 0.0, 0.5] {
             for m in 0u8..=2 {
                 let sing = Singularity::new(0.0, 1.0, vec![AsymptTerm::sided_log(r, m, 0.0, 0.0)]);
@@ -493,8 +490,7 @@ mod tests {
             }
         }
 
-        // What does survive at Ω_p still does: a constant as it stands, and anything
-        // divergent as an infinity
+        // Value at Ω_p: a constant as it stands, and an infinity for anything divergent
         let constant = Singularity::new(0.0, 1.0, vec![AsymptTerm::power(0.0, 1.5)]);
         assert_eq!(constant.value(0.0), 1.5);
         let divergent = Singularity::new(0.0, 1.0, vec![AsymptTerm::power(-0.5, 2.0)]);
@@ -504,9 +500,9 @@ mod tests {
     }
 
     #[test]
-    fn many_logarithms() {
-        // A term may carry any number of logarithms, and its integral follows the
-        // recurrence rather than a closed form written out per power
+    fn higher_logarithm_power() {
+        // A term may carry any power of the logarithm, and its integral follows the
+        // recurrence instead of a closed form written out per power
         let sing = Singularity::new(0.0, 1.0, vec![AsymptTerm::sided_log(-0.5, 2, 1.0, 1.0)]);
         let u = 0.25f64;
         assert_relative_eq!(
@@ -670,7 +666,7 @@ mod tests {
         assert_relative_eq!(sing.finite_limit(), 3.0 * s.ln(), max_relative = 1e-14);
         assert_eq!(unit.finite_limit(), 0.0);
 
-        // A power law carries no such remainder whatever the scale
+        // A power law produces no such remainder whatever the scale
         let edge = Singularity::new(0.0, 5.0, vec![AsymptTerm::power(0.5, 1.0)]);
         assert_eq!(edge.finite_limit(), 0.0);
     }
