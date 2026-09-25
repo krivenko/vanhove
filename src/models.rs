@@ -964,7 +964,7 @@ impl ContinuousSF for LiebDOS {
 /// where $K(m)$ is the complete elliptic integral of the first kind. Positions of the band
 /// edges are $\epsilon \pm 2\sqrt{2}t$.
 ///
-/// The weight of the flat band is that of one band out of three, as carried by the DOS
+/// The weight of the flat band is that of one band out of three, as given by the DOS
 /// averaged over the three sites of the unit cell. It is not the flat band weight of the
 /// local DOS, which vanishes on the corner site and equals $1/2$ on the rim sites.
 pub fn lieb(eps: f64, t: f64) -> SpectralFunction {
@@ -982,19 +982,15 @@ pub fn lieb(eps: f64, t: f64) -> SpectralFunction {
 ///
 /// The simple cubic lattice is defined by the hopping constant `t` and the local energy
 /// level `eps`, with the dispersion law
-/// $\varepsilon(k) = \epsilon - 2t[\cos(k_x) + \cos(k_y) + \cos(k_z)]$. It has no closed
-/// form, but the dispersion is a sum of three independent one-dimensional bands, so the
-/// density of states is a convolution:
+/// $\varepsilon(k) = \epsilon - 2t[\cos(k_x) + \cos(k_y) + \cos(k_z)]$. Its density of
+/// states has no closed form, but the dispersion is a sum of three independent
+/// one-dimensional bands, so it is a convolution:
 /// $$
 ///     A_{\mathrm{sc}} = A_{\mathrm{chain}} \ast A_{\mathrm{square}},
 /// $$
 /// the square lattice being itself two chains. The band runs from $\epsilon - 6t$ to
-/// $\epsilon + 6t$, with band edges at $\pm 6t$ and van Hove saddles at $\pm 2t$.
-///
-/// Nothing of that structure is written down here, not the positions and not the
-/// coefficients. It is derived from the two operands by [`SpectralFunction::conv()`],
-/// which finds $1/4\pi^2 t^{3/2}$ at the band edges and $-3/4\pi^2 t^{3/2}$ at the
-/// saddles to nine digits.
+/// $\epsilon + 6t$, with square-root cusps at the band edges and van Hove saddles at
+/// $\epsilon \pm 2t$.
 pub fn simple_cubic(eps: f64, t: f64) -> SpectralFunction {
     assert!(t > 0.0, "hopping constant must be positive");
     chain(eps, t).conv(&square(0.0, t), None)
@@ -1004,6 +1000,7 @@ pub fn simple_cubic(eps: f64, t: f64) -> SpectralFunction {
 mod tests {
     use super::*;
     use crate::models;
+    use crate::util;
     use approx::assert_relative_eq;
 
     fn compute_moment(dos: &SpectralFunction, order: i32) -> f64 {
@@ -1016,15 +1013,12 @@ mod tests {
         let mu: Vec<f64> = std::iter::once(1.0).chain(mu).collect();
         (0..mu.len())
             .map(|n| {
+                let c_row = util::binomials(n);
                 (0..=n)
-                    .map(|k| binomial(n, k) * eps.powi((n - k) as i32) * mu[k])
+                    .map(|k| c_row[k] * eps.powi((n - k) as i32) * mu[k])
                     .sum()
             })
             .collect()
-    }
-
-    fn binomial(n: usize, k: usize) -> f64 {
-        (1..=k).map(|i| (n - k + i) as f64 / i as f64).product()
     }
 
     /// Central moments of a spectral function symmetric about its center, the odd ones
@@ -1109,20 +1103,20 @@ mod tests {
                 &[9.0 / (4.0 * PI.powi(2)) * (3.0 + LN_2)],
             );
         }
-        // The Dirac point sits between the two logarithms and carries 3\sqrt{3}/\pi of
+        // The Dirac point sits between the two logarithms and holds 3\sqrt{3}/\pi of
         // the weight, whatever the hopping constant
         let log_weight = (9.0 + 3.0 * LN_2) / (2.0 * PI.powi(2));
         check_asympt_int(
             &HoneycombDOS::new(eps, t),
             &[log_weight, 3.0 * 3.0f64.sqrt() / PI, log_weight],
         );
-        // The bands touch at ε between the two logarithms and carry 2/\pi of the
+        // The bands touch at ε between the two logarithms and hold 2/\pi of the
         // weight there, whatever the hopping constant
         let log_weight = 4.0 * (SQRT_2 - (1.0 + SQRT_2).ln()) / PI.powi(2);
         check_asympt_int(&LiebDOS::new(eps, t), &[log_weight, 2.0 / PI, log_weight]);
 
         // A pure power law is its own asymptotics, whatever the exponent, so the
-        // singular part carries the whole unit weight of A(ω)
+        // singular part holds the whole unit weight of A(ω)
         for r in [-0.5f64, 0.0, 0.5, 1.0, 1.5, 2.5] {
             check_asympt_int(&PowerLawDOS::new(eps, r, 2.0), &[1.0]);
         }
@@ -1492,7 +1486,7 @@ mod tests {
             }
 
             // Subtracting it leaves R(ω) with no kink to speak of: the slope it used to
-            // carry away from ε is down to a fraction of a percent of the coefficient
+            // have away from ε is down to a fraction of a percent of the coefficient
             let r0 = dos.regular(eps);
             for h in [1e-2f64, 1e-3] {
                 let slope = (dos.regular(eps + h) - r0) / h;
@@ -1684,7 +1678,7 @@ mod tests {
             }
 
             // Subtracting it leaves R(ω) with no kink to speak of: the slope it used to
-            // carry away from ε is down to a fraction of a percent of the coefficient
+            // have away from ε is down to a fraction of a percent of the coefficient
             let r0 = dos.regular(eps);
             for h in [1e-2f64, 1e-3] {
                 let slope = (dos.regular(eps + h) - r0) / h;
@@ -1696,7 +1690,7 @@ mod tests {
         }
     }
 
-    /// Every model with a bounded support convolves, whatever it carries: a flat band
+    /// Every model with a bounded support convolves, whatever it contains: a flat band
     /// as a resonance, a Dirac point, a band touching, a divergence at an edge.
     #[test]
     fn every_bounded_model_convolves() {
@@ -1747,7 +1741,7 @@ mod tests {
                 max_relative = 1e-7,
                 epsilon = 1e-9,
             );
-            // A divergence is a legitimate answer - a resonance of one operand carries
+            // A divergence is a legitimate answer - a resonance of one operand shifts
             // the band edge of the other onto some frequency, and kagome's flat band
             // puts a chain's inverse square root exactly at the origin. What must not
             // appear is a value that is no number at all.
@@ -1787,8 +1781,8 @@ mod tests {
         }
         assert!(sc.continuous_at(eps) > 0.0);
 
-        // Moments of the simple cubic band, none of which the library is told:
-        // 6t², 90t⁴ and 1860t⁶ about the band centre
+        // Moments of the simple cubic DOS, none of which the library is told:
+        // 6t^2, 90t^4 and 1860t^6 about the band centre
         for (order, known) in [(2i32, 6.0f64), (4, 90.0), (6, 1860.0)] {
             let moment = sc
                 .integrate(|omega: f64| (omega - eps).powi(order), None)
@@ -1797,7 +1791,7 @@ mod tests {
         }
     }
 
-    /// The saddles and band edges sit where the derivation says they do, and carry the
+    /// The saddles and band edges sit where the derivation says they do, and match the
     /// coefficients the literature gives.
     #[test]
     fn simple_cubic_van_hove_points() {
@@ -1807,8 +1801,8 @@ mod tests {
         let positions: Vec<f64> = csf.singularities().iter().map(|s| s.position()).collect();
         assert_eq!(positions, vec![-6.0 * t, -2.0 * t, 2.0 * t, 6.0 * t]);
 
-        // The saddles carry a square root, which is why a three-dimensional van Hove
-        // point is a cusp and not the peak the square lattice has
+        // The square root at the saddles is why a three-dimensional van Hove point is
+        // a cusp and not the peak the square lattice has
         for saddle in [-2.0 * t, 2.0 * t] {
             let sing = csf
                 .singularities()
@@ -1817,16 +1811,15 @@ mod tests {
                 .unwrap();
             assert!(!sing.is_trivial());
             // The cusp faces the band centre and the other side is analytic, so the
-            // square root is read off whichever side carries it. It sits on a constant
-            // the pair derived along with it, so two points are needed to separate the
-            // two: S(d) = C + A√d.
+            // square root is read off whichever side contains it. It sits on a constant,
+            // so two frequencies are needed to separate the two: S(d) = C + A√d.
             let side = if saddle < 0.0 { -1.0 } else { 1.0 };
             let at = |d: f64| sing.value(saddle + side * d);
             let (near, far) = (1e-8f64, 1e-6f64);
             let a = (at(far) - at(near)) / (far.sqrt() - near.sqrt());
             let c = at(near) - a * near.sqrt();
 
-            // A is the coefficient the literature gives, -3/4π²t^{3/2}
+            // A is the coefficient the literature gives, -3/4π^2t^{3/2}
             assert_relative_eq!(
                 a,
                 -3.0 / (4.0 * std::f64::consts::PI.powi(2) * t.powf(1.5)),
@@ -1837,7 +1830,7 @@ mod tests {
             assert_relative_eq!(at(third), c + a * third.sqrt(), max_relative = 1e-12);
         }
 
-        // The band edges carry the same square root at +1/4π²t^{3/2}
+        // The band edges show the same square root at +1/4π^2t^{3/2}
         for edge in [-6.0 * t, 6.0 * t] {
             let sing = csf
                 .singularities()
