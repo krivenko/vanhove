@@ -21,9 +21,10 @@ struct Panel {
 impl Panel {
     /// Number of coefficients the fit starts with.
     const MIN_ORDER: usize = 8;
-    /// Number of coefficients the fit refuses to grow beyond. An expansion still short
-    /// of `tol` at this point is not about to reach it: the regular part is not smooth
-    /// enough at an end of the panel for the coefficients to decay geometrically.
+    /// Number of coefficients the fit refuses to grow beyond. If the tolerance is not
+    /// reached at this point, the expansion is not about to reach it: the regular part
+    /// is not smooth enough at an end of the panel for the coefficients to decay
+    /// geometrically.
     const MAX_ORDER: usize = 512;
 
     /// Fit `f` over `segment`, doubling the order until the tail falls below `tol`
@@ -68,7 +69,7 @@ impl Panel {
 
 /// Continuous spectral function whose regular part is stored as a Chebyshev expansion.
 ///
-/// The support is split into panels at the interior singular points, each panel carrying
+/// The support is split into panels at the interior singular points, each panel holding
 /// its own expansion: $R(\omega)$ is smooth within a panel but need not be so across
 /// a singular point.
 #[derive(Debug, Clone)]
@@ -86,9 +87,8 @@ impl InterpolatedSF {
     /// Interpolate the regular part of `csf`.
     ///
     /// `tol` is a tolerance on the Chebyshev coefficients relative to the largest of
-    /// them, and defaults to $10^{-12}$. Consult [`InterpolatedSF::fit_error()`] for what
-    /// the fit actually achieved: a regular part that is not smooth at an end of a
-    /// panel converges too slowly to reach any tolerance worth asking for.
+    /// them, and defaults to $10^{-12}$. Consult [`InterpolatedSF::fit_error()`] for
+    /// what the fit actually achieved.
     pub fn new(csf: &dyn ContinuousSF, tol: Option<f64>) -> InterpolatedSF {
         InterpolatedSF::from_parts(
             csf.support(),
@@ -98,11 +98,10 @@ impl InterpolatedSF {
         )
     }
 
-    /// Interpolate a regular part handed over on its own, along with the support and
-    /// the singular structure it belongs to.
+    /// Interpolate a regular part given along with the support and the singular
+    /// structure it belongs to.
     ///
-    /// `regular` is sampled strictly between consecutive singular points, never at one,
-    /// and carries whatever `singularities` describes already subtracted.
+    /// `regular` is sampled strictly between consecutive singular points, never at one.
     pub fn from_parts<F: Fn(f64) -> f64>(
         support: Segment,
         singularities: Vec<Singularity>,
@@ -121,7 +120,7 @@ impl InterpolatedSF {
         assert!(tol > 0.0, "fit tolerance must be positive");
 
         // Panel boundaries: the ends of the support, and the singular points between
-        // them, which is every frequency where R(ω) stops being smooth
+        // them, where R(ω) stops being smooth
         let mut breaks: Vec<f64> = singularities
             .iter()
             .map(|s| s.position())
@@ -142,8 +141,8 @@ impl InterpolatedSF {
         }
     }
 
-    /// Largest tail left over by the fit, relative to the largest coefficient of its
-    /// panel.
+    /// Largest magnitude of the trailing coefficients left over by the fit, relative
+    /// to the largest coefficient of its panel.
     ///
     /// A value above the requested tolerance means the expansion was cut off before
     /// converging, and is an estimate of the relative error of $R(\omega)$.
@@ -157,8 +156,9 @@ impl ContinuousSF for InterpolatedSF {
         self.support
     }
     fn regular(&self, omega: f64) -> f64 {
-        // The panels tile the support, so the first one reaching omega owns it; a
-        // frequency past the last boundary belongs to the last panel by rounding.
+        // The panels tile the support, so the first one reaching `omega` from the left
+        // owns it; a frequency past the last boundary belongs to the last panel by
+        // rounding
         let panel = self
             .panels
             .iter()
@@ -193,7 +193,7 @@ mod tests {
     use crate::singularity::{AsymptTerm, Singularity};
     use approx::assert_abs_diff_eq;
 
-    /// Stand-in spectral function built straight out of its parts.
+    /// Stand-in spectral function.
     struct Model<F> {
         support: Segment,
         singularities: Vec<Singularity>,
@@ -223,7 +223,8 @@ mod tests {
         }
     }
 
-    /// Largest departure of the interpolation from `f` over the support.
+    /// Largest departure of the interpolation from `f` over the support;
+    /// estimated from samples on a uniform frequency grid.
     fn worst_error<F: Fn(f64) -> f64>(interp: &InterpolatedSF, f: F) -> f64 {
         let support = interp.support();
         (1..500).fold(0.0f64, |w, i| {
