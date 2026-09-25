@@ -135,8 +135,8 @@ fn gamma_laurent(n: usize, w: usize) -> Laurent {
 pub fn beta_derivatives(a: f64, b: f64, j_max: usize, k_max: usize) -> Table {
     let g_a = gamma_derivatives(a, j_max);
     let g_b = gamma_derivatives(b, k_max);
-    let r = recip_gamma_derivatives(a + b, j_max + k_max);
-    leibniz_table(&g_a, &g_b, |t| r[t], j_max, k_max, &0.0)
+    let inv_g_ab = recip_gamma_derivatives(a + b, j_max + k_max);
+    leibniz_table(&g_a, &g_b, &inv_g_ab, j_max, k_max, &0.0)
 }
 
 /// The Leibniz sum for $\Gamma(a)\,\Gamma(b)\cdot\frac{1}{\Gamma(a+b)}$, from the
@@ -145,12 +145,13 @@ pub fn beta_derivatives(a: f64, b: f64, j_max: usize, k_max: usize) -> Table {
 ///
 /// `g_a` are plain numbers, $a$ sitting nowhere near a pole. The other two factors carry
 /// whatever $\Gamma(b)$ does - numbers where it is finite, series in $\epsilon$ where it
-/// is not - and `zero` says what an empty sum of those is. `r` is reached at $p+q$, that
-/// factor being the only one to see both parameters.
+/// is not - and `zero` says what an empty sum of those is. `inv_g_ab` is indexed at
+/// $p+q$, that factor being the only one to see both parameters, so it runs to
+/// `j_max + k_max`.
 fn leibniz_table<T>(
     g_a: &[f64],
     g_b: &[T],
-    r: impl Fn(usize) -> T,
+    inv_g_ab: &[T],
     j_max: usize,
     k_max: usize,
     zero: &T,
@@ -159,8 +160,7 @@ where
     T: Clone + AddAssign<T>,
     for<'a> &'a T: Mul<&'a T, Output = T> + Mul<f64, Output = T>,
 {
-    // Pascal's triangle down to the deeper of the two orders, so that a row is built
-    // once rather than once per row of the other index
+    // Pascal's triangle down to the deeper of the two orders, so that a row is built once
     let c_rows: Vec<Vec<f64>> = (0..=j_max.max(k_max)).map(binomials).collect();
     let mut table = vec![vec![zero.clone(); k_max + 1]; j_max + 1];
     for j in 0..=j_max {
@@ -170,7 +170,7 @@ where
             for p in 0..=j {
                 for q in 0..=k {
                     let scale = c_row_j[p] * c_row_k[q] * g_a[j - p];
-                    let product = &g_b[k - q] * &r(p + q);
+                    let product = &g_b[k - q] * &inv_g_ab[p + q];
                     table[j][k] += &product * scale;
                 }
             }
@@ -199,16 +199,18 @@ pub fn beta_derivatives_laurent(
         g_b.push(g_b[k].diff());
     }
 
-    // R = 1/Γ at a+b = a-m+ε, entire and so an ordinary Taylor series
+    // 1/Γ at a+b = a-m+ε, entire and so an ordinary Taylor series
     let rg = recip_gamma_derivatives(a - m as f64, j_max + k_max + 2 * w + 2);
-    let r_series = |t: usize| {
-        let taylor: Vec<f64> = (0..=2 * w)
-            .map(|i| rg[t + i] / Gamma::gamma(i as f64 + 1.0))
-            .collect();
-        Laurent::from_taylor(w, &taylor)
-    };
+    let inv_g_ab: Vec<Laurent> = (0..=j_max + k_max)
+        .map(|t| {
+            let taylor: Vec<f64> = (0..=2 * w)
+                .map(|i| rg[t + i] / Gamma::gamma(i as f64 + 1.0))
+                .collect();
+            Laurent::from_taylor(w, &taylor)
+        })
+        .collect();
 
-    leibniz_table(&g_a, &g_b, r_series, j_max, k_max, &Laurent::zero(w))
+    leibniz_table(&g_a, &g_b, &inv_g_ab, j_max, k_max, &Laurent::zero(w))
 }
 
 //
