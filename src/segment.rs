@@ -2,8 +2,8 @@
 
 /// Segment of the frequency axis, $[\omega_{min}, \omega_{max}]$.
 ///
-/// A segment of zero length is a valid one, a discrete spectral function of a single
-/// resonance being supported on exactly that.
+/// A segment of zero length is valid, since it is the support of a discrete spectral
+/// function of a single resonance.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Segment {
     min: f64,
