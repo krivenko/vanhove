@@ -1,5 +1,7 @@
 //! Utility functions.
 
+use std::f64::consts::PI;
+
 use bilby::{
     QuadratureError, QuadratureResult, adaptive_integrate, integrate_infinite,
     integrate_semi_infinite_lower, integrate_semi_infinite_upper,
@@ -72,6 +74,44 @@ pub fn kahan_babushka_neumaier_sum<I: Iterator<Item = f64>>(input: I) -> f64 {
         sum = t;
     }
     sum + c
+}
+
+/// Chebyshev coefficients of `f` over $[-1, 1]$ from its values at `n` nodes.
+///
+/// The nodes are those of Gauss-Chebyshev quadrature of the first kind,
+/// $x_j = \cos\frac{\pi(j+1/2)}{n}$, which lie strictly inside the interval, so that
+/// `f` is never sampled at an end point. The $k = 0$ coefficient is returned already
+/// halved, making the expansion $\sum_k c_k T_k(x)$ as [`clenshaw_chebyshev()`]
+/// evaluates it.
+pub fn chebyshev_coeffs<F: Fn(f64) -> f64>(n: usize, f: F) -> Vec<f64> {
+    let theta: Vec<f64> = (0..n).map(|j| PI * (j as f64 + 0.5) / n as f64).collect();
+    let values: Vec<f64> = theta.iter().map(|&t| f(t.cos())).collect();
+    (0..n)
+        .map(|k| {
+            let sum = kahan_babushka_neumaier_sum(
+                values
+                    .iter()
+                    .zip(&theta)
+                    .map(|(v, &t)| v * (k as f64 * t).cos()),
+            );
+            let c = 2.0 * sum / n as f64;
+            if k == 0 { 0.5 * c } else { c }
+        })
+        .collect()
+}
+
+/// Clenshaw recurrence for the Chebyshev series $\sum_k c_k T_k(x)$.
+pub fn clenshaw_chebyshev(coeffs: &[f64], x: f64) -> f64 {
+    let Some((c0, rest)) = coeffs.split_first() else {
+        return 0.0;
+    };
+    let (mut b1, mut b2) = (0.0f64, 0.0f64);
+    for c in rest.iter().rev() {
+        let b0 = 2.0 * x * b1 - b2 + c;
+        b2 = b1;
+        b1 = b0;
+    }
+    x * b1 - b2 + c0
 }
 
 /// Call a bilby adaptive integration function depending on the integration limits.
@@ -155,6 +195,40 @@ mod tests {
         // Integer exponents beyond the powi() range fall back on powf()
         assert!(matches!(PowKind::of(32.0), PowKind::Powi(32)));
         assert!(matches!(PowKind::of(33.0), PowKind::Powf(_)));
+    }
+
+    #[test]
+    fn chebyshev() {
+        use util::{chebyshev_coeffs, clenshaw_chebyshev};
+
+        // T_3(x) = 4x^3 - 3x is one coefficient and nothing else
+        let t3 = |x: f64| 4.0 * x.powi(3) - 3.0 * x;
+        let c = chebyshev_coeffs(8, t3);
+        assert_relative_eq!(c[3], 1.0, max_relative = 1e-14);
+        for (k, ck) in c.iter().enumerate() {
+            if k != 3 {
+                assert_abs_diff_eq!(*ck, 0.0, epsilon = 1e-14);
+            }
+        }
+        for x in [-1.0, -0.3, 0.0, 0.5, 1.0] {
+            assert_abs_diff_eq!(clenshaw_chebyshev(&c, x), t3(x), epsilon = 1e-14);
+        }
+
+        // An analytic function converges geometrically, reaching machine precision
+        let c = chebyshev_coeffs(24, f64::exp);
+        for x in [-1.0, -0.3, 0.0, 0.5, 1.0] {
+            assert_relative_eq!(clenshaw_chebyshev(&c, x), x.exp(), max_relative = 1e-14);
+        }
+        assert!(c[20].abs() < 1e-14, "tail did not decay: {}", c[20]);
+
+        // The nodes stay inside the interval, leaving the end points unsampled
+        let _ = chebyshev_coeffs(16, |x| {
+            assert!(x.abs() < 1.0, "sampled the end point {x}");
+            x
+        });
+
+        // An empty series is the zero function
+        assert_eq!(clenshaw_chebyshev(&[], 0.5), 0.0);
     }
 
     #[test]
