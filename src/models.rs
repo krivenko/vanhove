@@ -978,6 +978,7 @@ pub fn lieb(eps: f64, t: f64) -> SpectralFunction {
 mod tests {
     use super::*;
     use crate::models;
+    use crate::util;
     use approx::assert_relative_eq;
 
     fn compute_moment(dos: &SpectralFunction, order: i32) -> f64 {
@@ -990,15 +991,12 @@ mod tests {
         let mu: Vec<f64> = std::iter::once(1.0).chain(mu).collect();
         (0..mu.len())
             .map(|n| {
+                let c_row = util::binomials(n);
                 (0..=n)
-                    .map(|k| binomial(n, k) * eps.powi((n - k) as i32) * mu[k])
+                    .map(|k| c_row[k] * eps.powi((n - k) as i32) * mu[k])
                     .sum()
             })
             .collect()
-    }
-
-    fn binomial(n: usize, k: usize) -> f64 {
-        (1..=k).map(|i| (n - k + i) as f64 / i as f64).product()
     }
 
     /// Central moments of a spectral function symmetric about its center, the odd ones

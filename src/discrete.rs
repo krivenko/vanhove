@@ -357,10 +357,6 @@ mod tests {
         sf.iter().map(|r| r.weight * r.eps.powi(n)).sum()
     }
 
-    fn binomial(n: usize, k: usize) -> f64 {
-        (1..=k).map(|i| (n - k + i) as f64 / i as f64).product()
-    }
-
     #[test]
     fn conv() {
         let a = DiscreteSF::from_iter([
@@ -408,8 +404,9 @@ mod tests {
 
         // Moments obey M_n = Σ_k C(n,k) M_k^A M_{n-k}^B
         for n in 0..=4 {
+            let c_row = util::binomials(n);
             let reference: f64 = (0..=n)
-                .map(|k| binomial(n, k) * moment(&a, k as i32) * moment(&b, (n - k) as i32))
+                .map(|k| c_row[k] * moment(&a, k as i32) * moment(&b, (n - k) as i32))
                 .sum();
             assert_relative_eq!(moment(&c, n as i32), reference, epsilon = 1e-12);
         }
