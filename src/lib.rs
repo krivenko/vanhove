@@ -82,7 +82,7 @@ use crate::singularity::{Singularity, Strength};
 /// assert!((dos.integrate(|omega| omega, None).unwrap() - 0.6).abs() < 1e-12);
 ///
 /// // It convolves like any model of the crate's own, the singular structure of the
-/// // result derived from the band edge it was handed
+/// // result derived from the band edge it was given
 /// let twice = dos.conv(&dos, None);
 /// assert!((twice.integrate(|_| 1.0, None).unwrap() - 1.0).abs() < 1e-9);
 /// assert!((twice.integrate(|omega| omega, None).unwrap() - 1.2).abs() < 1e-9);
@@ -96,8 +96,7 @@ pub trait ContinuousSF: Send + Sync {
     ///
     /// Smooth between consecutive singular points, which is where it is integrated
     /// and interpolated. How smooth is a matter of how many terms each $S_p$ has,
-    /// one more of them buying one more derivative, and falling short of it costs
-    /// convergence rather than correctness.
+    /// one more of them buying one more derivative.
     fn regular(&self, omega: f64) -> f64;
     /// Singular points $\Omega_p$ along with the closed form of $S_p$ at each.
     ///
@@ -171,15 +170,14 @@ impl Sub for SpectralFunction {
         self + (-rhs)
     }
 }
-/// Continuous contributions of the convolution of `discrete` with the continuous part
-/// of `sf`.
+/// Continuous contributions of the convolution of `discrete` with `continuous`.
 fn conv_discrete_continuous(
     discrete: &DiscreteSF,
-    sf: &SpectralFunction,
+    continuous: &[(Arc<dyn ContinuousSF>, f64)],
 ) -> Vec<(Arc<dyn ContinuousSF>, f64)> {
-    let mut contributions = Vec::with_capacity(discrete.len() * sf.continuous.len());
+    let mut contributions = Vec::with_capacity(discrete.len() * continuous.len());
     // A resonance displaces every band to its position and scales it by its weight
-    for (csf, w) in &sf.continuous {
+    for (csf, w) in continuous {
         for res in discrete.iter() {
             contributions.push((Arc::from(csf.shifted(res.eps)), w * res.weight));
         }
@@ -199,12 +197,13 @@ impl SpectralFunction {
     /// Two contributions count as one only when they share an allocation, so that
     /// separately built models of identical parameters stay apart.
     fn from_discrete_continuous(
-        dsf: DiscreteSF,
-        csf: Vec<(Arc<dyn ContinuousSF>, f64)>,
+        discrete: DiscreteSF,
+        continuous: Vec<(Arc<dyn ContinuousSF>, f64)>,
     ) -> SpectralFunction {
         // Contributions grouped by identity: (contribution, ∑ w, ∑ |w|)
-        let mut merged: Vec<(Arc<dyn ContinuousSF>, f64, f64)> = Vec::with_capacity(csf.len());
-        for (cd, w) in csf {
+        let mut merged: Vec<(Arc<dyn ContinuousSF>, f64, f64)> =
+            Vec::with_capacity(continuous.len());
+        for (cd, w) in continuous {
             match merged
                 .iter_mut()
                 .find(|(other, _, _)| Arc::ptr_eq(other, &cd))
@@ -217,7 +216,7 @@ impl SpectralFunction {
             }
         }
         SpectralFunction {
-            discrete: dsf,
+            discrete,
             continuous: merged
                 .into_iter()
                 .filter(|(_, sum, magnitude)| sum.abs() > DiscreteSF::WEIGHT_TOL * magnitude)
@@ -227,8 +226,11 @@ impl SpectralFunction {
     }
 
     /// Build a `SpectralFunction` out of a single continuous contribution of unit weight.
-    pub fn from_continuous<C: ContinuousSF + 'static>(csf: C) -> SpectralFunction {
-        SpectralFunction::from_discrete_continuous(DiscreteSF::new(), vec![(Arc::new(csf), 1.0)])
+    pub fn from_continuous<C: ContinuousSF + 'static>(continuous: C) -> SpectralFunction {
+        SpectralFunction::from_discrete_continuous(
+            DiscreteSF::new(),
+            vec![(Arc::new(continuous), 1.0)],
+        )
     }
 
     /// Discrete part of the spectral function.
@@ -281,29 +283,33 @@ impl SpectralFunction {
     /// Convolution with another spectral function,
     /// $\int A(\nu) B(\omega - \nu) d\nu$.
     ///
-    /// The singular structure of the result is derived rather than supplied: its van
-    /// Hove points are the pairwise sums of the frequencies where either operand stops
-    /// being smooth, and the asymptotics at each follows from the asymptotic forms of
-    /// the two. What is left over is interpolated to the relative tolerance `tol`,
-    /// which defaults to $10^{-12}$.
+    /// The singular structure of the result is derived: its van Hove points are
+    /// the pairwise sums of the frequencies where either operand stops being smooth.
+    /// The asymptotics at each singular point follows from the asymptotic forms of
+    /// $A$ and $B$. The regular part of the result is interpolated to the relative
+    /// tolerance `tol`, which defaults to $10^{-12}$.
     pub fn conv(&self, other: &SpectralFunction, tol: Option<f64>) -> SpectralFunction {
-        // Every resonance of one operand against the continuous part of the other
-        let mut continuous = conv_discrete_continuous(&self.discrete, other);
-        continuous.extend(conv_discrete_continuous(&other.discrete, self));
+        // $A \ast B$ splits four ways across the discrete and continuous parts of the
+        // two operands. These are the two cross terms: a resonance of one operand
+        // displaces the whole continuous part of the other to its position and scales
+        // it by its weight.
+        let mut continuous = conv_discrete_continuous(&self.discrete, &other.continuous);
+        continuous.extend(conv_discrete_continuous(&other.discrete, &self.continuous));
 
-        // Each pair of continuous contributions against each other. A convolution of
-        // two of them is one of them in its own right, so it is interpolated on its own
-        // and holds the two weights multiplied together rather than folded into it.
+        // The third term, continuous against continuous, taken one pair at a time. Such
+        // a convolution is a continuous contribution in its own right, so each pair
+        // becomes one interpolated contribution, and $w_1 w_2$ stays its weight rather
+        // than being scaled into the interpolant.
         let tol = tol.unwrap_or(InterpolatedSF::DEFAULT_TOL);
         for (c1, w1) in &self.continuous {
             for (c2, w2) in &other.continuous {
                 let (c1, c2) = (c1.as_ref(), c2.as_ref());
                 let support = conv::pair_support(c1, c2);
                 let singularities = conv::pair_singularities(c1, c2);
-                // What is taken away is the structure just derived, not the closed
-                // form the pairs are computed with: the two agree as the singular
-                // point is approached and differ away from it, the derived one
-                // stopping at an exponent the interpolation can absorb on its own.
+                // Subtracting the derived structure from the pair's value leaves a
+                // remainder smooth enough to fit. `from_parts()` puts the same
+                // structure back, so whatever the derived terms come to away from
+                // their own singular point cancels and never has to be right.
                 let regular = |omega: f64| {
                     let singular: f64 = singularities.iter().map(|s| s.value(omega)).sum();
                     conv::pair_value(c1, c2, omega, tol) - singular
@@ -314,6 +320,8 @@ impl SpectralFunction {
             }
         }
 
+        // The fourth term is discrete against discrete, which is exact and needs no
+        // interpolation
         SpectralFunction::from_discrete_continuous(self.discrete.conv(&other.discrete), continuous)
     }
 
@@ -484,6 +492,7 @@ mod tests {
     use crate::SpectralFunction;
     use crate::models::*;
     use crate::segment::Segment;
+    use crate::util;
     use approx::{assert_abs_diff_eq, assert_relative_eq};
     use std::f64::consts::PI;
 
@@ -859,12 +868,10 @@ mod tests {
 
         // Moments obey M_n = Σ_k C(n,k) M_k^A M_{n-k}^B
         let moment = |sf: &SpectralFunction, n: i32| sf.integrate(|w| w.powi(n), None).unwrap();
-        let binomial = |n: usize, k: usize| -> f64 {
-            (1..=k).map(|i| (n - k + i) as f64 / i as f64).product()
-        };
         for n in 0..=4usize {
+            let c_row = util::binomials(n);
             let reference: f64 = (0..=n)
-                .map(|k| binomial(n, k) * moment(&a, k as i32) * moment(&b, (n - k) as i32))
+                .map(|k| c_row[k] * moment(&a, k as i32) * moment(&b, (n - k) as i32))
                 .sum();
             assert_relative_eq!(moment(&c, n as i32), reference, max_relative = 1e-9);
         }
@@ -872,7 +879,7 @@ mod tests {
 
     #[test]
     fn conv_shifts_every_model() {
-        // Displacing a contribution must move all of it: support, regular part and
+        // Displacing a contribution must move its support, regular part and
         // singular points alike
         let by = 1.25f64;
         let unit = discrete(&[by], &[1.0]);
@@ -950,18 +957,16 @@ mod tests {
         let moment =
             |sf: &SpectralFunction, n: i32| sf.integrate(|omega: f64| omega.powi(n), None).unwrap();
         for n in 0..=4i32 {
+            let c_row = util::binomials(n as usize);
             let want: f64 = (0..=n)
-                .map(|k| {
-                    let binomial = crate::util::binomials(n as usize)[k as usize];
-                    binomial * moment(&a, k) * moment(&b, n - k)
-                })
+                .map(|k| c_row[k as usize] * moment(&a, k) * moment(&b, n - k))
                 .sum();
             assert_relative_eq!(moment(&c, n), want, max_relative = 1e-8, epsilon = 1e-10);
         }
     }
 
-    /// Both operands holding both kinds of part, which is the case the four ways of
-    /// pairing them all have to answer for at once.
+    /// Both operands holding both discrete and continuous parts: all four ways of
+    /// pairing them must be accounted for.
     #[test]
     fn conv_of_mixed_spectral_functions() {
         let a = 0.4 * discrete(&[-1.0, 0.5], &[0.3, 0.7]) + 0.6 * chain(0.0, 1.0);
@@ -990,7 +995,7 @@ mod tests {
         );
     }
 
-    /// Two boxes convolve into their triangle, and the result is fitted exactly
+    /// Two boxes convolve into a triangle, and the result is fitted exactly
     /// although nothing of it is derived: a kink at a panel boundary is a polynomial
     /// either side of it.
     #[test]
@@ -1067,10 +1072,10 @@ mod tests {
 
     #[test]
     fn broadened_mixed() {
-        // Reference value computed independently with mpmath (40 decimal digits).
         let dos = 2.0 * discrete(&[-0.7, 1.2], &[0.25, 0.6]) + 5.0 * gaussian(1.4, 0.5);
         assert_relative_eq!(
             dos.broadened(0.5, 1e-2, None).unwrap(),
+            // Reference value computed independently with mpmath (40 decimal digits).
             0.8138402146,
             epsilon = 1e-9
         );
