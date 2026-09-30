@@ -210,7 +210,7 @@ impl DiscreteSF {
         self.resonances.len()
     }
 
-    /// Does the spectral function carry no resonances?
+    /// Is the spectral function free of resonances?
     pub fn is_empty(&self) -> bool {
         self.resonances.is_empty()
     }
@@ -380,7 +380,7 @@ mod tests {
         ]);
         let c = a.conv(&b);
 
-        // Every pair meets at the sum of its positions, carrying the product of weights
+        // Every pair meets at the sum of its positions, with the product of weights
         assert_eq!(c.len(), 4);
         let expected = [(-0.5, 1.0), (0.5, -0.5), (2.5, 0.5), (3.5, -0.25)];
         for (res, (eps, weight)) in c.iter().zip(expected) {

@@ -707,12 +707,11 @@ pub fn triangular(eps: f64, t: f64) -> SpectralFunction {
 //
 
 /// Density of states of a honeycomb lattice.
-///
-/// The two bands $\pm t|f(k)|$ share the single-band dispersion of the triangular lattice
-/// via $|f(k)|^2 = 3 - x(k)$, $x$ being the triangular lattice energy measured from
-/// $\epsilon$ in units of $t$. The DOS is, therefore, that of the triangular lattice at
-/// $x = 3 - ((\omega-\epsilon)/t)^2$, reweighted by the Jacobian $|\omega-\epsilon|/t$ of
-/// that substitution.
+// The two bands $\pm t|f(k)|$ share the single-band dispersion of the triangular lattice
+// via $|f(k)|^2 = 3 - x(k)$, $x$ being the triangular lattice energy measured from
+// $\epsilon$ in units of $t$. The DOS is, therefore, that of the triangular lattice at
+// $x = 3 - ((\omega-\epsilon)/t)^2$, reweighted by the Jacobian $|\omega-\epsilon|/t$ of
+// that substitution.
 #[derive(Clone)]
 struct HoneycombDOS {
     eps: f64,
@@ -866,12 +865,11 @@ pub fn kagome(eps: f64, t: f64) -> SpectralFunction {
 //
 
 /// Density of states of the Lieb lattice.
-///
-/// The two dispersive bands $\pm 2t\sqrt{\cos(k_x)^2 + \cos(k_y)^2}$ share the dispersion
-/// of the square lattice via $u^2 - 1 = [\cos(2k_x) + \cos(2k_y)]/2$, $u$ being the energy
-/// measured from $\epsilon$ in units of $2t$. The DOS is, therefore, that of the square
-/// lattice at $x = u^2 - 1$, reweighted by $|u|$, half the Jacobian of that substitution,
-/// the other half splitting the weight between the two bands.
+// The two dispersive bands $\pm 2t\sqrt{\cos(k_x)^2 + \cos(k_y)^2}$ share the dispersion
+// of the square lattice via $u^2 - 1 = [\cos(2k_x) + \cos(2k_y)]/2$, $u$ being the energy
+// measured from $\epsilon$ in units of $2t$. The DOS is, therefore, that of the square
+// lattice at $x = u^2 - 1$, reweighted by $|u|$, half the Jacobian of that substitution,
+// the other half splitting the weight between the two bands.
 #[derive(Clone)]
 struct LiebDOS {
     eps: f64,

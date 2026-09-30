@@ -77,9 +77,10 @@ impl AsymptTerm {
 
 /// $\int_0^l u^r \ln^m u\\, du$, for $r > -1$.
 ///
-/// Each power of the logarithm is integrated by parts against the one below it,
-/// $I_m = (l^{r+1}\ln^m l - m I_{m-1})/(r+1)$.
 pub(crate) fn power_log_integral(exponent: f64, log_power: u8, l: f64) -> f64 {
+    // Each power of the logarithm is integrated by parts against the one below it,
+    // $I_m = (l^{r+1}\ln^m l - m I_{m-1})/(r+1)$
+
     // The side is empty when Ω_p sits at that end of the support
     if l == 0.0 {
         return 0.0;
@@ -199,19 +200,20 @@ impl Singularity {
 
     /// $S_p$ written out in $|\omega-\Omega_p|$ rather than in the scaled distance $u$.
     ///
-    /// Folding the scale in costs terms: with $\ln u = \ln|\omega-\Omega_p| - \ln s$,
-    /// $$
-    ///     c u^r \ln^m u = c s^{-r} \sum_{j=0}^m \binom{m}{j} (-\ln s)^j
-    ///         |\omega-\Omega_p|^r \ln^{m-j}|\omega-\Omega_p|,
-    /// $$
-    /// so one term with the $m$-th power of the logarithm leaves $m+1$ terms behind.
+    /// Folding the scale in costs terms: one with the $m$-th power of the logarithm
+    /// leaves $m+1$ terms behind.
     pub(crate) fn unscaled_terms(&self) -> Vec<UnscaledAsymptTerm> {
+        // With $\ln u = \ln|\omega-\Omega_p| - \ln s$,
+        // $$
+        //     c u^r \ln^m u = c s^{-r} \sum_{j=0}^m \binom{m}{j} (-\ln s)^j
+        //         |\omega-\Omega_p|^r \ln^{m-j}|\omega-\Omega_p|
+        // $$
         let ln_scale = self.scale.ln();
         let mut form = Vec::with_capacity(self.terms.len());
         for t in &self.terms {
             let m = i32::from(t.log_power);
             // Consecutive weights c C(m,j) (-ln s)^j differ by a factor of
-            // -ln(s) (m-j)/(j+1), so one running product carries the whole expansion
+            // -ln(s) (m-j)/(j+1), so one running product covers the whole expansion
             let mut w = self.scale.powf(-t.exponent);
             for j in 0..=m {
                 form.push(UnscaledAsymptTerm {
@@ -280,11 +282,11 @@ impl Singularity {
     /// Limit of $S_p(\omega)$ at $\Omega_p$ with every divergent term dropped, taken
     /// from above if the sides differ.
     ///
-    /// With $\ln u = \ln|\omega-\Omega_p| - \ln s$, a term of the $m$-th power of the
-    /// logarithm leaves $c(-\ln s)^m$ behind and every other power of the logarithm
-    /// diverges. The terms with $r > 0$ vanish, and those with $r < 0$ do not stay
-    /// finite at all.
+    /// A term of positive $r$ vanishes there, one of negative $r$ never stays finite,
+    /// and of the rest only the bare constant survives.
     pub fn finite_limit(&self) -> f64 {
+        // With $\ln u = \ln|\omega-\Omega_p| - \ln s$, a term of the $m$-th power of
+        // the logarithm leaves $c(-\ln s)^m$ behind and every other power diverges
         self.unscaled_terms()
             .into_iter()
             .filter(|t| t.exponent == 0.0 && t.log_power == 0)
@@ -501,7 +503,7 @@ mod tests {
 
     #[test]
     fn higher_logarithm_power() {
-        // A term may carry any power of the logarithm, and its integral follows the
+        // A term may have any power of the logarithm, and its integral follows the
         // recurrence instead of a closed form written out per power
         let sing = Singularity::new(0.0, 1.0, vec![AsymptTerm::sided_log(-0.5, 2, 1.0, 1.0)]);
         let u = 0.25f64;

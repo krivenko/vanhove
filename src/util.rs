@@ -82,12 +82,12 @@ pub fn kahan_babushka_neumaier_sum<I: Iterator<Item = f64>>(input: I) -> f64 {
 
 /// Chebyshev coefficients of `f` over $[-1, 1]$ from its values at `n` nodes.
 ///
-/// The nodes are those of Gauss-Chebyshev quadrature of the first kind,
-/// $x_j = \cos\frac{\pi(j+1/2)}{n}$, which lie strictly inside the interval, so that
 /// `f` is never sampled at an end point. The $k = 0$ coefficient is returned already
 /// halved, making the expansion $\sum_k c_k T_k(x)$ as [`clenshaw_chebyshev()`]
 /// evaluates it.
 pub fn chebyshev_coeffs<F: Fn(f64) -> f64>(n: usize, f: F) -> Vec<f64> {
+    // The nodes are those of Gauss-Chebyshev quadrature of the first kind,
+    // $x_j = \cos\frac{\pi(j+1/2)}{n}$, which lie strictly inside the interval
     let theta: Vec<f64> = (0..n).map(|j| PI * (j as f64 + 0.5) / n as f64).collect();
     let values: Vec<f64> = theta.iter().map(|&t| f(t.cos())).collect();
     (0..n)
@@ -152,10 +152,10 @@ pub fn bilby_integrate_or_0<F: Fn(f64) -> f64>(f: F, segment: Segment, tol: f64)
 
 /// The whole row $\binom{n}{0}, \binom{n}{1}, \ldots, \binom{n}{n}$.
 ///
-/// Each coefficient follows from the one before it, which is cheaper than asking for
-/// them one at a time and is how they are needed wherever a binomial expansion is
-/// summed over.
+/// Wanted whole wherever a binomial expansion is summed over.
 pub fn binomials(n: usize) -> Vec<f64> {
+    // Each coefficient follows from the one before it, which is cheaper than asking for
+    // them one at a time
     let mut c_row = vec![1.0; n + 1];
     for k in 1..=n {
         c_row[k] = c_row[k - 1] * (n - k + 1) as f64 / k as f64;
@@ -188,9 +188,9 @@ pub fn alternating_sign(n: usize) -> f64 {
 ///
 /// Diverges at the non-positive integers, where $\Gamma(x)$ has its poles.
 ///
-/// The recurrence $\psi^{(n)}(x) = \psi^{(n)}(x+1) - (-1)^n n!\\,x^{-n-1}$ walks the
-/// argument $x$ up to where the asymptotic series converges.
 pub fn polygamma(n: u32, x: f64) -> f64 {
+    // The recurrence $\psi^{(n)}(x) = \psi^{(n)}(x+1) - (-1)^n n!\,x^{-n-1}$ walks the
+    // argument $x$ up to where the asymptotic series converges
     /// $B_{2k}$ for $k = 1, 2, \ldots$
     const BERNOULLI: [f64; 8] = [
         1.0 / 6.0,
@@ -395,7 +395,7 @@ mod tests {
         assert_eq!(util::binomials(1), vec![1.0, 1.0]);
         assert_eq!(util::binomials(5), vec![1.0, 5.0, 10.0, 10.0, 5.0, 1.0]);
 
-        // The running product carries a row far past where it would overflow an
+        // The running product takes a row far past where it would overflow an
         // integer of any convenient width, the rounding staying in the last few digits
         let c_row = util::binomials(60);
         assert_eq!(c_row.len(), 61);

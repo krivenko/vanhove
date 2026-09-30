@@ -35,7 +35,7 @@ use crate::singularity::{Singularity, Strength};
 ///
 /// $S_p(\omega)$ is described in closed form by the corresponding [`Singularity`],
 /// which fixes it over the whole support and not merely near $\Omega_p$. A support
-/// carrying singularities must be bounded.
+/// with singularities must be bounded.
 ///
 /// # Example
 ///
@@ -95,7 +95,7 @@ pub trait ContinuousSF: Send + Sync {
     /// [`support()`](ContinuousSF::support), where it must be a finite number.
     ///
     /// Smooth between consecutive singular points, which is where it is integrated
-    /// and interpolated. How smooth is a matter of how many terms each $S_p$ carries,
+    /// and interpolated. How smooth is a matter of how many terms each $S_p$ has,
     /// one more of them buying one more derivative, and falling short of it costs
     /// convergence rather than correctness.
     fn regular(&self, omega: f64) -> f64;
@@ -254,7 +254,7 @@ impl SpectralFunction {
     /// Replace the regular part of every continuous contribution with a Chebyshev
     /// interpolation of it.
     ///
-    /// The singular parts are carried over exactly, so the result departs from the
+    /// The singular parts are kept exactly, so the result departs from the
     /// original in $R(\omega)$ alone, and only within the relative tolerance `tol` of
     /// the fit. It pays for itself when one spectral function is integrated many times
     /// over and its regular part is expensive, as for the lattice models built on an
@@ -293,7 +293,7 @@ impl SpectralFunction {
 
         // Each pair of continuous contributions against each other. A convolution of
         // two of them is one of them in its own right, so it is interpolated on its own
-        // and carries the two weights multiplied together rather than folded into it.
+        // and holds the two weights multiplied together rather than folded into it.
         let tol = tol.unwrap_or(InterpolatedSF::DEFAULT_TOL);
         for (c1, w1) in &self.continuous {
             for (c2, w2) in &other.continuous {
@@ -303,7 +303,7 @@ impl SpectralFunction {
                 // What is taken away is the structure just derived, not the closed
                 // form the pairs are computed with: the two agree as the singular
                 // point is approached and differ away from it, the derived one
-                // stopping at an exponent the interpolation can carry on its own.
+                // stopping at an exponent the interpolation can absorb on its own.
                 let regular = |omega: f64| {
                     let singular: f64 = singularities.iter().map(|s| s.value(omega)).sum();
                     conv::pair_value(c1, c2, omega, tol) - singular
@@ -763,7 +763,7 @@ mod tests {
         assert_eq!(fast.support(), dos.support());
         assert_relative_eq!(fast.total_weight(), dos.total_weight(), epsilon = 1e-14);
 
-        // The singular part is carried over as it stands, divergence included
+        // The singular part is kept as it stands, divergence included
         assert_eq!(fast.continuous_at(0.0), f64::INFINITY);
 
         // Away from the singular point the expansion stands in for A(ω)
@@ -913,7 +913,7 @@ mod tests {
 
     #[test]
     fn conv_two_continuous() {
-        // Two continuous parts convolve into one interpolated contribution carrying
+        // Two continuous parts convolve into one interpolated contribution holding
         // the whole spectral weight between them
         let c = chain(0.0, 1.0).conv(&square(0.0, 1.0), None);
         assert_relative_eq!(c.total_weight(), 1.0, max_relative = 1e-9);
@@ -960,7 +960,7 @@ mod tests {
         }
     }
 
-    /// Both operands carrying both kinds of part, which is the case the four ways of
+    /// Both operands holding both kinds of part, which is the case the four ways of
     /// pairing them all have to answer for at once.
     #[test]
     fn conv_of_mixed_spectral_functions() {
@@ -968,7 +968,7 @@ mod tests {
         let b = 0.25 * discrete(&[2.0], &[1.0]) + 0.75 * flat(0.0, 1.0, 0.0);
         let c = a.conv(&b, None);
 
-        // Weight is multiplicative, and each of the four pairings carries its share
+        // Weight is multiplicative, and each of the four pairings takes its share
         assert_relative_eq!(
             c.total_weight(),
             a.total_weight() * b.total_weight(),
