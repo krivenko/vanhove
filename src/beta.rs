@@ -344,19 +344,21 @@ fn inc_beta_derivatives_near_one(
 /// Tolerance the series are summed to.
 const TOL: f64 = 1e-17;
 
-/// How near a non-positive integer `b` has to be before the two pieces are refused.
+/// How near a whole number $\rho$ may come before the pole of $\Gamma(-\rho)$ swamps
+/// the finite part beside it.
 ///
-/// $\Gamma(b)$ grows as $1/\epsilon$ there, so a caller that subtracts them back loses
-/// roughly $\log_{10}(1/\epsilon)$ digits to the cancellation - four at this width, ten
-/// by $\epsilon = 10^{-12}$. [`inc_beta_derivatives()`] is under no such restriction: it
-/// reaches the difference without forming either piece.
-const POLE_WIDTH: f64 = 1e-4;
+/// Splitting a beta function about such a $\rho$ puts that pole into both parts, the
+/// complete value and the remainder alike, and only their difference is finite.
+/// $\Gamma(-\rho)$ grows as $1/\epsilon$, so a caller that forms both and subtracts
+/// them back loses roughly $\log_{10}(1/\epsilon)$ digits to the cancellation: four at
+/// this width, ten by $\epsilon = 10^{-12}$. [`inc_beta_derivatives()`] is under no such
+/// restriction, reaching the difference without forming either part.
+pub const WHOLE_EXPONENT_WIDTH: f64 = 1e-4;
 
-/// Whether `b` is near enough to a pole of $\Gamma$ that only the difference of the two
-/// pieces is a number.
-fn near_a_pole(b: f64) -> bool {
-    let nearest = (-b).round();
-    nearest >= 0.0 && (-b - nearest).abs() < POLE_WIDTH
+/// Whether $\rho$ lies within [`WHOLE_EXPONENT_WIDTH`] of a non-negative integer.
+pub fn near_a_whole_exponent(rho: f64) -> bool {
+    let nearest = rho.round();
+    nearest >= 0.0 && (rho - nearest).abs() < WHOLE_EXPONENT_WIDTH
 }
 
 /// The complete beta's derivative table and the deficit's, as
@@ -383,7 +385,7 @@ pub fn inc_beta_derivatives_split(
         "the first parameter of an incomplete beta must be positive"
     );
     assert!((0.0..=1.0).contains(&z), "the argument must lie in [0, 1]");
-    if near_a_pole(b) {
+    if near_a_whole_exponent(-b) {
         return None;
     }
     let complete = beta_derivatives(a, b, j_max, k_max);
@@ -521,7 +523,7 @@ pub fn outer_beta_complete(a: f64, b: f64, j_max: usize, k_max: usize) -> Table 
     assert!(b > 0.0, "the outer beta needs b > 0 to converge at u = 0");
     // At a whole rho the i = n term divides by zero and the table contains inf and NaN.
     debug_assert!(
-        !near_a_pole(-(a + b - 1.0)),
+        !near_a_whole_exponent(a + b - 1.0),
         "the complete outer beta has a pole at a whole rho"
     );
     let mut out = outer_beta_below_one(a, b, 1.0, j_max, k_max);
@@ -544,7 +546,7 @@ pub fn outer_beta_complete(a: f64, b: f64, j_max: usize, k_max: usize) -> Table 
 /// [`outer_beta_complete()`] and [`outer_beta_tail()`], the two pieces
 /// $B^{\mathrm{out}}_U$ is the difference of.
 ///
-/// [`None`] where $\rho$ sits within [`POLE_WIDTH`] of a whole number, neither piece
+/// [`None`] where $\rho$ sits within [`WHOLE_EXPONENT_WIDTH`] of a whole number, neither piece
 /// being a number there and only their difference, and [`None`] for a `u_max` that is
 /// not finite.
 pub fn outer_beta_derivatives_split(
@@ -560,7 +562,7 @@ pub fn outer_beta_derivatives_split(
         "the outer beta runs over a non-negative range"
     );
     let rho = a + b - 1.0;
-    if !u_max.is_finite() || near_a_pole(-rho) {
+    if !u_max.is_finite() || near_a_whole_exponent(rho) {
         return None;
     }
     let complete = outer_beta_complete(a, b, j_max, k_max);
@@ -1019,7 +1021,7 @@ mod tests {
     }
 
     #[test]
-    fn near_a_pole() {
+    fn a_pole_is_no_special_case() {
         // A non-positive integer `b` is where the complete beta has a pole, so any
         // route through it returns an infinity. Nothing singles it out here: the answer
         // walks through, from either side and at the integer itself.

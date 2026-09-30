@@ -11,6 +11,7 @@
 use special::Gamma;
 
 use crate::ContinuousSF;
+use crate::beta;
 use crate::beta::{
     beta_derivatives, inc_beta_derivatives, inc_beta_derivatives_split, outer_beta_complete,
     outer_beta_derivatives, outer_beta_derivatives_split, outer_beta_entire_factor,
@@ -189,17 +190,6 @@ fn reach_between(s1: Segment, p1: f64, s2: Segment, p2: f64) -> Segment {
 /// $|\Delta|^2$ has two derivatives, which is more than a panel boundary asks for.
 const MAX_DERIVED_EXPONENT: f64 = 2.0;
 
-/// How close $\rho = r_1 + r_2 + 1$ has to be to a whole number for the degenerate
-/// coefficients to be used in place of the generic ones.
-///
-/// A band and not an exact test. At $\rho = n + \epsilon$,
-/// $|\Delta|^{\rho} = |\Delta|^n(1 + \epsilon\ln|\Delta| + \ldots)$, so the logarithm
-/// surviving at $\epsilon \to 0$ has coefficient $\epsilon X_0$ and a finite logarithm
-/// forces $X_0$ to go as $1/\epsilon$. The generic formula duly returns that pole and
-/// the regular part the opposite of it, to be subtracted in `f64`. The width sits where
-/// the generic formula stops being the better of the two.
-const WHOLE_EXPONENT_WIDTH: f64 = 1e-4;
-
 /// Asymptotic terms of $T_1 \ast T_2$ at $\omega = \Omega_1 + \Omega_2$.
 ///
 /// The result spans $|\Delta|^\rho \ln^m|\Delta|$ for $\Delta=\omega-(\Omega_1 + \Omega_2)$
@@ -238,9 +228,15 @@ fn convolve_terms(
     let mut terms = Vec::new();
 
     if rho < MAX_DERIVED_EXPONENT {
-        let whole = rho.round();
-        let [mid, lo, hi] = if whole >= 0.0 && (rho - whole).abs() < WHOLE_EXPONENT_WIDTH {
-            degenerate_stretches(t1, t2, whole as usize)
+        // A band around each whole $\rho$ and not an exact test. At
+        // $\rho = n + \epsilon$ the family reads
+        // $|\Delta|^{\rho} = |\Delta|^n(1 + \epsilon\ln|\Delta| + \ldots)$, so the
+        // logarithm surviving at $\epsilon \to 0$ has coefficient $\epsilon X_0$ and a
+        // finite logarithm forces $X_0$ to go as $1/\epsilon$. The generic formula duly
+        // returns that pole and the regular part the opposite of it, which is the same
+        // cancellation `beta` refuses to hand out, so the width is shared with it.
+        let [mid, lo, hi] = if beta::near_a_whole_exponent(rho) {
+            degenerate_stretches(t1, t2, rho.round() as usize)
         } else {
             generic_stretches(t1, t2)
         };
@@ -332,7 +328,7 @@ fn middle_coefficients(r1: f64, m1: usize, r2: f64, m2: usize) -> Vec<f64> {
 }
 
 /// What the three stretches contribute where $\rho$ is a non-negative integer $n$, or
-/// near enough to one that [`WHOLE_EXPONENT_WIDTH`] claims it.
+/// near enough to one that [`beta::WHOLE_EXPONENT_WIDTH`] claims it.
 ///
 fn degenerate_stretches(t1: UnscaledAsymptTerm, t2: UnscaledAsymptTerm, n: usize) -> [Vec<f64>; 3] {
     // $\Delta^n$ is analytic, and the outer stretches no longer converge: their
