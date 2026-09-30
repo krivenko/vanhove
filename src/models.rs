@@ -964,7 +964,7 @@ impl ContinuousSF for LiebDOS {
 /// where $K(m)$ is the complete elliptic integral of the first kind. Positions of the band
 /// edges are $\epsilon \pm 2\sqrt{2}t$.
 ///
-/// The weight of the flat band is that of one band out of three, as carried by the DOS
+/// The weight of the flat band is that of one band out of three, as given by the DOS
 /// averaged over the three sites of the unit cell. It is not the flat band weight of the
 /// local DOS, which vanishes on the corner site and equals $1/2$ on the rim sites.
 pub fn lieb(eps: f64, t: f64) -> SpectralFunction {
@@ -1103,20 +1103,20 @@ mod tests {
                 &[9.0 / (4.0 * PI.powi(2)) * (3.0 + LN_2)],
             );
         }
-        // The Dirac point sits between the two logarithms and carries 3\sqrt{3}/\pi of
+        // The Dirac point sits between the two logarithms and holds 3\sqrt{3}/\pi of
         // the weight, whatever the hopping constant
         let log_weight = (9.0 + 3.0 * LN_2) / (2.0 * PI.powi(2));
         check_asympt_int(
             &HoneycombDOS::new(eps, t),
             &[log_weight, 3.0 * 3.0f64.sqrt() / PI, log_weight],
         );
-        // The bands touch at ε between the two logarithms and carry 2/\pi of the
+        // The bands touch at ε between the two logarithms and hold 2/\pi of the
         // weight there, whatever the hopping constant
         let log_weight = 4.0 * (SQRT_2 - (1.0 + SQRT_2).ln()) / PI.powi(2);
         check_asympt_int(&LiebDOS::new(eps, t), &[log_weight, 2.0 / PI, log_weight]);
 
         // A pure power law is its own asymptotics, whatever the exponent, so the
-        // singular part carries the whole unit weight of A(ω)
+        // singular part holds the whole unit weight of A(ω)
         for r in [-0.5f64, 0.0, 0.5, 1.0, 1.5, 2.5] {
             check_asympt_int(&PowerLawDOS::new(eps, r, 2.0), &[1.0]);
         }
@@ -1486,7 +1486,7 @@ mod tests {
             }
 
             // Subtracting it leaves R(ω) with no kink to speak of: the slope it used to
-            // carry away from ε is down to a fraction of a percent of the coefficient
+            // have away from ε is down to a fraction of a percent of the coefficient
             let r0 = dos.regular(eps);
             for h in [1e-2f64, 1e-3] {
                 let slope = (dos.regular(eps + h) - r0) / h;
@@ -1678,7 +1678,7 @@ mod tests {
             }
 
             // Subtracting it leaves R(ω) with no kink to speak of: the slope it used to
-            // carry away from ε is down to a fraction of a percent of the coefficient
+            // have away from ε is down to a fraction of a percent of the coefficient
             let r0 = dos.regular(eps);
             for h in [1e-2f64, 1e-3] {
                 let slope = (dos.regular(eps + h) - r0) / h;

@@ -233,8 +233,8 @@ impl Singularity {
         self.terms.iter().map(|t| t.value(d < 0.0, u)).sum()
     }
 
-    /// $\int_{\omega_{min}}^{\omega_{max}} S_p(\omega)d\omega$ over `support`, in closed
-    /// form.
+    /// $\int_{\omega_{min}}^{\omega_{max}} S_p(\omega)d\omega$ over `support`,
+    /// in closed form.
     pub fn integral(&self, support: Segment) -> f64 {
         if self.is_trivial() {
             return 0.0;
@@ -257,11 +257,13 @@ impl Singularity {
             * self.scale
     }
 
-    /// Limit of $S_p(\omega)$ at $\Omega_p$ with every divergent term dropped.
+    /// Limit of $S_p(\omega)$ at $\Omega_p$ with every divergent term dropped, taken
+    /// from above if the sides differ.
     ///
-    /// With $\ln u = \ln|\omega-\Omega_p| - \ln s$, a term of $m$ logarithms leaves
-    /// $c(-\ln s)^m$ behind and every other power of the logarithm diverges. The terms
-    /// with $r > 0$ vanish, and those with $r < 0$ do not stay finite at all.
+    /// With $\ln u = \ln|\omega-\Omega_p| - \ln s$, a term of the $m$-th power of the
+    /// logarithm leaves $c(-\ln s)^m$ behind and every other power of the logarithm
+    /// diverges. The terms with $r > 0$ vanish, and those with $r < 0$ do not stay
+    /// finite at all.
     pub fn finite_limit(&self) -> f64 {
         self.unscaled_terms()
             .into_iter()
@@ -617,7 +619,7 @@ mod tests {
         assert_relative_eq!(sing.finite_limit(), 3.0 * s.ln(), max_relative = 1e-14);
         assert_eq!(unit.finite_limit(), 0.0);
 
-        // A power law carries no such remainder whatever the scale
+        // A power law produces no such remainder whatever the scale
         let edge = Singularity::new(0.0, 5.0, vec![AsymptTerm::power(0.5, 1.0)]);
         assert_eq!(edge.finite_limit(), 0.0);
     }

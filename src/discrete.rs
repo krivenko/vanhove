@@ -16,7 +16,7 @@ pub struct Resonance {
 
 /// Discrete spectral function with a finite number of resonances,
 /// $$
-///     A(\omega) = \sum_p w_p \delta(\omega - \varepsilon_p).
+///     D(\omega) = \sum_p w_p \delta(\omega - \varepsilon_p).
 /// $$
 ///
 /// The list of resonances is sealed upon construction and is always kept in its
@@ -147,9 +147,9 @@ impl<'a> IntoIterator for &'a DiscreteSF {
     }
 }
 
-/// Merge resonances sharing the same position within an ε-sorted list, and remove
-/// the groups whose total weight is negligible. Called on a freshly sorted list, this
-/// establishes the canonical form.
+/// Merge resonances sharing the same position within an $\varepsilon$-sorted list, and
+/// remove the groups whose total weight is negligible. Called on a freshly sorted list,
+/// this establishes the canonical form.
 fn canonicalize(resonances: &mut Vec<Resonance>) {
     let (mut w, mut i) = (0, 0);
     while i < resonances.len() {
@@ -160,8 +160,7 @@ fn canonicalize(resonances: &mut Vec<Resonance>) {
             i += 1;
         }
 
-        // A lone resonance needs no summation and can only be negligible
-        // w.r.t. itself, which `total.abs() > tol * mag` never is
+        // A lone resonance needs no summation and can never be negligible
         if i == start + 1 {
             resonances[w] = resonances[start];
             w += 1;
