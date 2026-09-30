@@ -276,9 +276,7 @@ mod tests {
     fn pow_kind() {
         use util::PowKind;
 
-        // Every shortcut agrees with powf() to within a few ulps. It is not bitwise
-        // agreement: powi() multiplies repeatedly and InvSqrt rounds twice, while
-        // powf() is correctly rounded.
+        // Every shortcut agrees with powf() to within a few ulps.
         for r in [0.0f64, 1.0, 0.5, -0.5, 3.0, -7.0, 4.0, 2.5, -0.25] {
             let kind = PowKind::of(r);
             for u in [0.0f64, 1e-8, 0.25, 1.0, 7.5] {
@@ -295,7 +293,7 @@ mod tests {
 
         // Integer exponents beyond the powi() range fall back on powf()
         assert!(matches!(PowKind::of(32.0), PowKind::Powi(32)));
-        assert!(matches!(PowKind::of(33.0), PowKind::Powf(_)));
+        assert!(matches!(PowKind::of(33.0), PowKind::Powf(33.0)));
     }
 
     #[test]
