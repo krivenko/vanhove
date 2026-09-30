@@ -22,6 +22,11 @@ pub struct AsymptTerm {
 }
 
 impl AsymptTerm {
+    /// Exponent from which a term is no longer worth describing as singular.
+    ///
+    /// $u^r$ has two continuous derivatives at $\Omega_p$ from $r = 2$ up.
+    pub const MAX_EXPONENT: f64 = 2.0;
+
     /// $c u^r$.
     pub fn power(exponent: f64, c: f64) -> AsymptTerm {
         AsymptTerm::make(exponent, 0, c, c)

@@ -185,11 +185,6 @@ fn reach_between(s1: Segment, p1: f64, s2: Segment, p2: f64) -> Segment {
         .expect("a feature lies within its own support")
 }
 
-/// Exponent above which a derived term is smooth enough to leave to the interpolation.
-///
-/// $|\Delta|^2$ has two derivatives, which is more than a panel boundary asks for.
-const MAX_DERIVED_EXPONENT: f64 = 2.0;
-
 /// Asymptotic terms of $T_1 \ast T_2$ at $\omega = \Omega_1 + \Omega_2$.
 ///
 /// The result spans $|\Delta|^\rho \ln^m|\Delta|$ for $\Delta=\omega-(\Omega_1 + \Omega_2)$
@@ -206,9 +201,9 @@ const MAX_DERIVED_EXPONENT: f64 = 2.0;
 /// a value at $\Delta \to 0$ known in closed form, so only such a pair derives the constant
 /// it leaves there.
 ///
-/// Past `rho = MAX_DERIVED_EXPONENT` the family is left to the interpolation and the
-/// constant is all that comes back, so nothing at all comes back only where every
-/// coefficient vanishes.
+/// Past a $\rho$ of [`AsymptTerm::MAX_EXPONENT`] the family is left to the
+/// interpolation and the constant is all that comes back, so nothing at all comes back
+/// only where every coefficient vanishes.
 fn convolve_terms(
     t1: UnscaledAsymptTerm,
     t2: UnscaledAsymptTerm,
@@ -227,7 +222,7 @@ fn convolve_terms(
     let (cb1, ca1, cb2, ca2) = (t1.c_below, t1.c_above, t2.c_below, t2.c_above);
     let mut terms = Vec::new();
 
-    if rho < MAX_DERIVED_EXPONENT {
+    if rho < AsymptTerm::MAX_EXPONENT {
         // A band around each whole $\rho$ and not an exact test. At
         // $\rho = n + \epsilon$ the family reads
         // $|\Delta|^{\rho} = |\Delta|^n(1 + \epsilon\ln|\Delta| + \ldots)$, so the
