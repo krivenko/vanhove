@@ -102,7 +102,6 @@ impl InterpolatedSF {
     /// structure it belongs to.
     ///
     /// `regular` is sampled strictly between consecutive singular points, never at one.
-    #[allow(dead_code)]
     pub fn from_parts<F: Fn(f64) -> f64>(
         support: Segment,
         singularities: Vec<Singularity>,

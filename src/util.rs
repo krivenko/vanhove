@@ -146,7 +146,6 @@ pub fn bilby_integrate<F: Fn(f64) -> f64>(
 /// Call [`bilby_integrate`] and return zero where it refuses the request.
 ///
 /// Refusal is about the request: a tolerance that is not positive or an invalid interval.
-#[allow(dead_code)]
 pub fn bilby_integrate_or_0<F: Fn(f64) -> f64>(f: F, segment: Segment, tol: f64) -> f64 {
     bilby_integrate(f, segment, tol).map_or(0.0, |r| r.value)
 }
@@ -156,7 +155,6 @@ pub fn bilby_integrate_or_0<F: Fn(f64) -> f64>(f: F, segment: Segment, tol: f64)
 /// Each coefficient follows from the one before it, which is cheaper than asking for
 /// them one at a time and is how they are needed wherever a binomial expansion is
 /// summed over.
-#[allow(dead_code)]
 pub fn binomials(n: usize) -> Vec<f64> {
     let mut c_row = vec![1.0; n + 1];
     for k in 1..=n {
@@ -169,7 +167,6 @@ pub fn binomials(n: usize) -> Vec<f64> {
 pub type Table = Vec<Vec<f64>>;
 
 /// Elementwise difference of two tables.
-#[allow(dead_code)]
 pub fn subtract_tables(x: &Table, y: &Table) -> Table {
     x.iter()
         .zip(y)
@@ -178,13 +175,11 @@ pub fn subtract_tables(x: &Table, y: &Table) -> Table {
 }
 
 /// A table with every entry negated.
-#[allow(dead_code)]
 pub fn negate_table(x: &Table) -> Table {
     x.iter().map(|r| r.iter().map(|v| -v).collect()).collect()
 }
 
 /// $(-1)^n$.
-#[allow(dead_code)]
 pub fn alternating_sign(n: usize) -> f64 {
     if n.is_multiple_of(2) { 1.0 } else { -1.0 }
 }
@@ -195,7 +190,6 @@ pub fn alternating_sign(n: usize) -> f64 {
 ///
 /// The recurrence $\psi^{(n)}(x) = \psi^{(n)}(x+1) - (-1)^n n!\\,x^{-n-1}$ walks the
 /// argument $x$ up to where the asymptotic series converges.
-#[allow(dead_code)]
 pub fn polygamma(n: u32, x: f64) -> f64 {
     /// $B_{2k}$ for $k = 1, 2, \ldots$
     const BERNOULLI: [f64; 8] = [
