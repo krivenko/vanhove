@@ -17,7 +17,7 @@ use bilby::QuadratureError;
 use num_complex::Complex64;
 
 use crate::discrete::DiscreteSF;
-use crate::interp::Interpolated;
+use crate::interp::InterpolatedSF;
 use crate::segment::Segment;
 use crate::singularity::{Singularity, Strength};
 
@@ -213,7 +213,7 @@ impl SpectralFunction {
             .iter()
             .map(|(csf, w)| {
                 if csf.support().is_bounded() {
-                    let interpolated = Interpolated::new(csf.as_ref(), tol);
+                    let interpolated = InterpolatedSF::new(csf.as_ref(), tol);
                     (Arc::new(interpolated) as Arc<dyn ContinuousSF>, *w)
                 } else {
                     (Arc::clone(csf), *w)
