@@ -236,8 +236,10 @@ pub fn semicircle(eps: f64, r: f64) -> SpectralFunction {
 struct PowerLawDOS {
     /// Band edges.
     edges: Segment,
-    /// Band edge singularity, which is the whole of $A(\omega)$.
-    singularity: [Singularity; 1],
+    /// The band edge in closed form, which is the whole of $A(\omega)$.
+    law: Singularity,
+    /// Whether the law goes out as the singular part rather than the regular one.
+    singular: bool,
 }
 impl PowerLawDOS {
     fn new(eps: f64, r: f64, w: f64) -> PowerLawDOS {
@@ -245,11 +247,8 @@ impl PowerLawDOS {
         assert!(w > 0.0, "bandwidth must be positive");
         PowerLawDOS {
             edges: Segment::new(eps, eps + w),
-            singularity: [Singularity::new(
-                eps,
-                w,
-                vec![AsymptTerm::power(r, (r + 1.0) / w)],
-            )],
+            law: Singularity::new(eps, w, vec![AsymptTerm::power(r, (r + 1.0) / w)]),
+            singular: r < AsymptTerm::MAX_EXPONENT,
         }
     }
 }
@@ -257,16 +256,25 @@ impl ContinuousSF for PowerLawDOS {
     fn support(&self) -> Segment {
         self.edges
     }
-    fn regular(&self, _omega: f64) -> f64 {
-        0.0
+    fn regular(&self, omega: f64) -> f64 {
+        if self.singular {
+            0.0
+        } else {
+            self.law.value(omega)
+        }
     }
     fn singularities(&self) -> &[Singularity] {
-        &self.singularity
+        if self.singular {
+            std::slice::from_ref(&self.law)
+        } else {
+            &[]
+        }
     }
     fn shifted(&self, by: f64) -> Box<dyn ContinuousSF> {
         Box::new(PowerLawDOS {
             edges: self.edges.shifted(by),
-            singularity: self.singularity.each_ref().map(|s| s.shifted(by)),
+            law: self.law.shifted(by),
+            singular: self.singular,
         })
     }
 }
@@ -292,20 +300,27 @@ pub fn powerlaw(eps: f64, r: f64, w: f64) -> SpectralFunction {
 struct PseudogapDOS {
     /// Band edges.
     edges: Segment,
-    /// Pseudogap singularity, which is the whole of $A(\omega)$.
-    singularity: [Singularity; 1],
+    /// The pseudogap in closed form, which is the whole of $A(\omega)$.
+    law: Singularity,
+    /// A singularity at $\epsilon$ with no terms, held only where the law goes out as the
+    /// regular part rather than the singular one.
+    marker: Option<Singularity>,
 }
 impl PseudogapDOS {
     fn new(eps: f64, r: f64, d: f64) -> PseudogapDOS {
         assert!(r > 0.0, "asymptotics exponent must be positive");
         assert!(d > 0.0, "bandwidth must be positive");
+        let marker = if r < AsymptTerm::MAX_EXPONENT {
+            None
+        } else {
+            // $\epsilon$ sits inside the support, so without a termless singularity marker
+            // there the interpolation runs one panel straight through the cusp.
+            Some(Singularity::new(eps, d, vec![]))
+        };
         PseudogapDOS {
             edges: Segment::new(eps - d, eps + d),
-            singularity: [Singularity::new(
-                eps,
-                d,
-                vec![AsymptTerm::power(r, (r + 1.0) / (2.0 * d))],
-            )],
+            law: Singularity::new(eps, d, vec![AsymptTerm::power(r, (r + 1.0) / (2.0 * d))]),
+            marker,
         }
     }
 }
@@ -313,16 +328,24 @@ impl ContinuousSF for PseudogapDOS {
     fn support(&self) -> Segment {
         self.edges
     }
-    fn regular(&self, _omega: f64) -> f64 {
-        0.0
+    fn regular(&self, omega: f64) -> f64 {
+        if self.marker.is_some() {
+            self.law.value(omega)
+        } else {
+            0.0
+        }
     }
     fn singularities(&self) -> &[Singularity] {
-        &self.singularity
+        match &self.marker {
+            Some(marker) => std::slice::from_ref(marker),
+            None => std::slice::from_ref(&self.law),
+        }
     }
     fn shifted(&self, by: f64) -> Box<dyn ContinuousSF> {
         Box::new(PseudogapDOS {
             edges: self.edges.shifted(by),
-            singularity: self.singularity.each_ref().map(|s| s.shifted(by)),
+            law: self.law.shifted(by),
+            marker: self.marker.as_ref().map(|s| s.shifted(by)),
         })
     }
 }
@@ -1113,14 +1136,18 @@ mod tests {
         let log_weight = 4.0 * (SQRT_2 - (1.0 + SQRT_2).ln()) / PI.powi(2);
         check_asympt_int(&LiebDOS::new(eps, t), &[log_weight, 2.0 / PI, log_weight]);
 
-        // A pure power law is its own asymptotics, whatever the exponent, so the
-        // singular part holds the whole unit weight of A(ω)
-        for r in [-0.5f64, 0.0, 0.5, 1.0, 1.5, 2.5] {
+        // A pure power law below AsymptTerm::MAX_EXPONENT is its own asymptotics, so
+        // the singular part holds the whole unit weight of A(ω). From it up the law
+        // goes to the regular part: the band edge leaves nothing behind, while the
+        // pseudogap leaves its position with no weight on it.
+        for r in [-0.5f64, 0.0, 0.5, 1.0, 1.5] {
             check_asympt_int(&PowerLawDOS::new(eps, r, 2.0), &[1.0]);
         }
-        for r in [0.5f64, 1.0, 1.5, 2.5] {
+        check_asympt_int(&PowerLawDOS::new(eps, 2.5, 2.0), &[]);
+        for r in [0.5f64, 1.0, 1.5] {
             check_asympt_int(&PseudogapDOS::new(eps, r, 2.0), &[1.0]);
         }
+        check_asympt_int(&PseudogapDOS::new(eps, 2.5, 2.0), &[0.0]);
     }
 
     #[test]
@@ -1180,8 +1207,8 @@ mod tests {
         let eps = 0.5f64;
         let w = 2.0f64;
 
-        // r < 0 makes A(ω) diverge at the band edge, -1 < r < 1 puts the whole of it into
-        // the singular part, and r >= 1 into the regular one
+        // r < 0 makes A(ω) diverge at the band edge. Below AsymptTerm::MAX_EXPONENT the
+        // whole of A(ω) is the singular part, from it up the regular one.
         for r in [-0.5f64, 0.0, 0.5, 1.0, 2.5] {
             let dos = models::powerlaw(eps, r, w);
             assert_eq!(dos.support(), Some(Segment::new(eps, eps + w)));
@@ -1214,7 +1241,8 @@ mod tests {
         let eps = 0.5f64;
         let d = 2.0f64;
 
-        // r < 1 puts the whole of A(ω) into the singular part, r >= 1 into the regular one
+        // Below AsymptTerm::MAX_EXPONENT the whole of A(ω) is the singular part, from it
+        // up the regular one
         for r in [0.5f64, 1.0, 2.5] {
             let dos = models::pseudogap(eps, r, d);
             assert_eq!(dos.support(), Some(Segment::new(eps - d, eps + d)));
