@@ -43,6 +43,7 @@ The numerical work is delegated to the
 | `chain(eps, t)`             | Linear chain, square-root divergent edges                           |
 | `bethe(z, eps, t)`          | Bethe lattice of coordination number `z`, square-root band edges    |
 | `square(eps, t)`            | Square lattice, logarithmic van Hove peak                           |
+| `simple_cubic(eps, t)`      | Simple cubic lattice, square-root cusps at four van Hove points     |
 | `triangular(eps, t)`        | Triangular lattice, asymmetric with a logarithmic peak              |
 | `honeycomb(eps, t)`         | Honeycomb lattice, two logarithmic peaks about a Dirac point        |
 | `kagome(eps, t)`            | Kagome lattice, flat band $\delta$-peak at a band edge              |
@@ -79,8 +80,8 @@ let g = semicircle(0.0, 2.0)
 ```
 
 `integrate()` takes an optional absolute tolerance (`1e-10` by default) and
-returns a `Result`, since the underlying adaptive quadrature can fail to
-converge for a badly behaved `f`.
+returns a `Result`, since the underlying adaptive quadrature refuses a request it
+cannot make sense of, such as a tolerance that is not a number.
 
 ## Documentation
 
