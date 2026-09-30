@@ -32,6 +32,11 @@ impl Segment {
         self.min <= omega && omega <= self.max
     }
 
+    /// Whether `omega` lies within the segment, its ends excluded.
+    pub fn strictly_contains(&self, omega: f64) -> bool {
+        self.min < omega && omega < self.max
+    }
+
     /// Whether the segment is of a finite length.
     pub fn is_bounded(&self) -> bool {
         self.min.is_finite() && self.max.is_finite()
@@ -147,6 +152,24 @@ mod tests {
         assert!(unbounded.contains(1e300));
         assert!(unbounded.contains(f64::INFINITY));
         assert!(!unbounded.contains(f64::NAN));
+    }
+
+    #[test]
+    fn strictly_contains() {
+        let segment = Segment::new(-1.5, 2.0);
+        for omega in [-1.4, 0.0, 1.9] {
+            assert!(segment.strictly_contains(omega), "{omega} is inside");
+        }
+        for omega in [-1.5, 2.0, -1.6, 2.1, f64::NAN] {
+            assert!(!segment.strictly_contains(omega), "{omega} is not");
+        }
+
+        // One ulp in from either end is already inside
+        assert!(segment.strictly_contains((-1.5f64).next_up()));
+        assert!(segment.strictly_contains(2.0f64.next_down()));
+
+        // A segment of zero length has no inside at all
+        assert!(!Segment::new(2.0, 2.0).strictly_contains(2.0));
     }
 
     #[test]
