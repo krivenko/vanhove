@@ -36,7 +36,12 @@ impl FromIterator<Resonance> for DiscreteSF {
     fn from_iter<I: IntoIterator<Item = Resonance>>(resonances: I) -> Self {
         let mut resonances: Vec<Resonance> = resonances
             .into_iter()
-            .inspect(|res| debug_assert!(!res.eps.is_nan(), "res.eps must not be NaN"))
+            .inspect(|res| {
+                assert!(
+                    res.eps.is_finite(),
+                    "a resonance must sit at a finite frequency"
+                )
+            })
             .filter(|res| res.weight != 0.0)
             .map(|res| Resonance {
                 // canonicalize -0.0 so that it groups with 0.0 under total_cmp
@@ -266,6 +271,19 @@ impl DiscreteSF {
 mod tests {
     use super::*;
     use approx::assert_relative_eq;
+
+    #[test]
+    #[should_panic(expected = "must sit at a finite frequency")]
+    fn from_iter_nan() {
+        let _ = DiscreteSF::one_resonance(f64::NAN, 1.0);
+    }
+
+    #[test]
+    #[should_panic(expected = "must sit at a finite frequency")]
+    fn from_iter_infinite() {
+        // A resonance out at infinity would leave `support()` no segment to name
+        let _ = DiscreteSF::one_resonance(f64::INFINITY, 1.0);
+    }
 
     #[test]
     fn add() {
