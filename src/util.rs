@@ -150,6 +150,50 @@ pub fn bilby_integrate_or_0<F: Fn(f64) -> f64>(f: F, segment: Segment, tol: f64)
     bilby_integrate(f, segment, tol).map_or(0.0, |r| r.value)
 }
 
+/// $\int s(x) g(x) dx$ over `segment` done by subtracting the singularity at `point`.
+///
+/// `s` is the singular factor as a function of the integration variable and `s_integral`
+/// is its integral over a stretch of that variable in closed form.
+pub fn integrate_by_subtraction<S, I, G>(
+    point: f64,
+    s: S,
+    s_integral: I,
+    g: G,
+    segment: Segment,
+    tol: f64,
+) -> Result<f64, QuadratureError>
+where
+    S: Fn(f64) -> f64,
+    I: Fn(Segment) -> f64,
+    G: Fn(f64) -> f64,
+{
+    // Taking $s(x)g(point)$ out leaves $s(x)[g(x) - g(point)]$ bounded where the bare
+    // product is not, and what was subtracted comes back through $\int s$ in closed form.
+    // With the point outside the segment nothing in range diverges, and with $g$
+    // infinite at the point the subtraction leaves nothing finite behind. Both fall
+    // back to the integral of the bare product.
+    if !segment.contains(point) {
+        return Ok(bilby_integrate(|x| s(x) * g(x), segment, tol)?.value);
+    }
+    let g_point = g(point);
+    if !g_point.is_finite() {
+        return Ok(bilby_integrate(|x| s(x) * g(x), segment, tol)?.value);
+    }
+    let bounded = bilby_integrate(
+        |x| {
+            if x == point {
+                0.0
+            } else {
+                s(x) * (g(x) - g_point)
+            }
+        },
+        segment,
+        tol,
+    )?
+    .value;
+    Ok(bounded + g_point * s_integral(segment))
+}
+
 /// The whole row $\binom{n}{0}, \binom{n}{1}, \ldots, \binom{n}{n}$.
 ///
 /// Wanted whole wherever a binomial expansion is summed over.

@@ -394,6 +394,10 @@ impl SpectralFunction {
     ///
     /// The integral $\int A(\omega)f(\omega)d\omega$ is computed to the absolute
     /// tolerance `tol`, which defaults to $10^{-10}$.
+    ///
+    /// `f` must be finite everywhere on [`SpectralFunction::support()`]. The tolerance is
+    /// otherwise reached only as far as `f` is smooth: a jump at a frequency where
+    /// $A(\omega)$ diverges puts it out of reach.
     pub fn integrate<F: Fn(f64) -> f64>(
         &self,
         f: F,
@@ -422,23 +426,15 @@ impl SpectralFunction {
                 if sing.is_trivial() {
                     continue;
                 }
-                // ∫S_p(ω)[f(ω) - f(Ω_p)]dω
-                let omega_p = sing.position();
-                let f_p = f(omega_p);
-                res_contrib += util::bilby_integrate(
-                    |omega| {
-                        if omega == omega_p {
-                            0.0
-                        } else {
-                            sing.value(omega) * (f(omega) - f_p)
-                        }
-                    },
+                // ∫S_p(ω)[f(ω) - f(Ω_p)]dω + f(Ω_p)∫S_p(ω)dω
+                res_contrib += util::integrate_by_subtraction(
+                    sing.position(),
+                    |omega| sing.value(omega),
+                    |stretch| sing.integral(stretch),
+                    &f,
                     support,
                     tol,
-                )?
-                .value;
-                // ∫S_p(ω)dω f(Ω_p)
-                res_contrib += sing.integral(support) * f_p;
+                )?;
             }
 
             result += w * res_contrib;
@@ -450,7 +446,8 @@ impl SpectralFunction {
     /// $f(\omega)$.
     ///
     /// The real and imaginary parts of $\int A(\omega)f(\omega)d\omega$ are computed
-    /// separately, each to the absolute tolerance `tol`.
+    /// separately, each to the absolute tolerance `tol` and under the conditions
+    /// [`SpectralFunction::integrate()`] places on a real-valued integrand.
     pub fn integrate_complex<F: Fn(f64) -> Complex64>(
         &self,
         f: F,

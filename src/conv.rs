@@ -20,7 +20,8 @@ use crate::beta::{
 use crate::segment::Segment;
 use crate::singularity::{AsymptTerm, Singularity, UnscaledAsymptTerm, power_log_integral};
 use crate::util::{
-    Table, alternating_sign, bilby_integrate_or_0, binomials, negate_table, subtract_tables,
+    Table, alternating_sign, bilby_integrate_or_0, binomials, integrate_by_subtraction,
+    negate_table, subtract_tables,
 };
 
 //
@@ -535,33 +536,21 @@ impl Part<'_> {
     }
 }
 
-/// $\int S(\nu) g(\nu) d\nu$ over `segment`, with `g` anchored at the singular point.
+/// $\int S(\nu) g(\nu) d\nu$ over `segment`, with the singularity subtracted out.
 ///
-/// Worth nothing unless `g` is continuous at the point, which confines this to a stretch
-/// holding one divergence and no more.
+/// Worth nothing unless `g` is continuous at the singular point, which confines this to a
+/// stretch holding one divergence and no more.
 fn subtracted<G: Fn(f64) -> f64>(part: &Part, g: G, segment: Segment, tol: f64) -> f64 {
-    // Anchoring leaves $S(\nu)[g(\nu) - g(\Omega)]$ bounded where the bare product is
-    // not, and the constant is restored through $\int S$ in closed form
-    let point = part.at();
-    if !segment.contains(point) {
-        return bilby_integrate_or_0(|nu| part.value(nu) * g(nu), segment, tol);
-    }
-    let anchor = g(point);
-    if !anchor.is_finite() {
-        return bilby_integrate_or_0(|nu| part.value(nu) * g(nu), segment, tol);
-    }
-    let bounded = bilby_integrate_or_0(
-        |nu| {
-            if nu == point {
-                0.0
-            } else {
-                part.value(nu) * (g(nu) - anchor)
-            }
-        },
+    // A refused request is worth zero here, the pair being one contribution among many
+    integrate_by_subtraction(
+        part.at(),
+        |nu| part.value(nu),
+        |stretch| part.integral(stretch),
+        g,
         segment,
         tol,
-    );
-    bounded + anchor * part.integral(segment)
+    )
+    .unwrap_or(0.0)
 }
 
 /// $\int S_p(\nu) S_q(\omega-\nu) d\nu$ over `segment`, without a quadrature.
