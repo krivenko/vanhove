@@ -324,13 +324,8 @@ impl SpectralFunction {
             let support = csf.support();
 
             // Integrate the regular part, ∫R(ω)f(ω)dω
-            res_contrib += util::bilby_integrate(
-                |omega| csf.regular(omega) * f(omega),
-                support.min(),
-                support.max(),
-                tol,
-            )?
-            .value;
+            res_contrib +=
+                util::bilby_integrate(|omega| csf.regular(omega) * f(omega), support, tol)?.value;
 
             // Add integrals of the asymptotics
             for sing in csf.singularities() {
@@ -348,8 +343,7 @@ impl SpectralFunction {
                             sing.value(omega) * (f(omega) - f_p)
                         }
                     },
-                    support.min(),
-                    support.max(),
+                    support,
                     tol,
                 )?
                 .value;
