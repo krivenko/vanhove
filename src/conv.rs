@@ -101,14 +101,14 @@ pub fn pair_singularities(c1: &dyn ContinuousSF, c2: &dyn ContinuousSF) -> Vec<S
         for (p2, (singular2, constant2)) in &forms2 {
             let reach = reach_between(s1, *p1, s2, *p2);
             let mut terms = Vec::new();
-            for &t1 in singular1 {
-                for &t2 in singular2 {
+            for t1 in singular1 {
+                for t2 in singular2 {
                     terms.extend(convolve_terms(t1, t2, Some(reach)));
                 }
-                terms.extend(convolve_terms(t1, *constant2, None));
+                terms.extend(convolve_terms(t1, constant2, None));
             }
-            for &t2 in singular2 {
-                terms.extend(convolve_terms(*constant1, t2, None));
+            for t2 in singular2 {
+                terms.extend(convolve_terms(constant1, t2, None));
             }
             // Several pairs can land at one frequency. A pair deriving no singularity is
             // recorded anyway: the position says where the interpolation must start
@@ -153,13 +153,7 @@ type LocalForm = (Vec<AsymptTerm>, AsymptTerm);
 fn local_form_at(csf: &dyn ContinuousSF, position: f64) -> LocalForm {
     let support = csf.support();
     let (reaches_below, reaches_above) = (position > support.min(), position < support.max());
-    let sided = |t: &AsymptTerm| {
-        let (c_below, c_above) = t.sides();
-        t.with_sides(
-            if reaches_below { c_below } else { 0.0 },
-            if reaches_above { c_above } else { 0.0 },
-        )
-    };
+    let sided = |t: &AsymptTerm| t.sides_kept(reaches_below, reaches_above);
 
     let mut singular = Vec::new();
     let mut constant = csf.regular(position);
@@ -188,14 +182,16 @@ fn reach_between(s1: Segment, p1: f64, s2: Segment, p2: f64) -> Segment {
 
 /// Asymptotic terms of $T_1 \ast T_2$ at $\omega = \Omega_1 + \Omega_2$.
 ///
-/// The result spans $|\Delta|^\rho \ln^m|\Delta|$ for $\Delta=\omega-(\Omega_1 + \Omega_2)$
-/// and $m$ up to $m_1 + m_2$, or one higher where $\rho = r_1 + r_2 + 1$ is a whole number
-/// and the pole of $\Gamma(-\rho)$ trades a finite part for a logarithm.
-/// Each coefficient is the three stretches added together with the sides they draw on:
+/// The pair makes one term, $|\Delta|^\rho P^{\pm}(\ln|\Delta|)$ at
+/// $\Delta=\omega-(\Omega_1 + \Omega_2)$ and $\rho = r_1 + r_2 + 1$, of degree
+/// $m_1 + m_2$ or one higher where $\rho$ is a whole number and the pole of
+/// $\Gamma(-\rho)$ trades a finite part for a logarithm. Every pair of powers the two
+/// terms hold contributes the three stretches, weighted by the sides those powers draw
+/// on:
 /// $$
-///     C^+_m = c_1^+ c_2^+ X^{mid}_m + c_1^- c_2^+ X^{lo}_m + c_1^+ c_2^- X^{hi}_m,
+///     P^+ \mathrel{+}= c_1^+ c_2^+ X^{mid} + c_1^- c_2^+ X^{lo} + c_1^+ c_2^- X^{hi},
 /// $$
-/// and $C^-_m$ the same with every $\pm$ flipped.
+/// and $P^-$ the same with every $\pm$ flipped.
 ///
 /// `reach` is how far the pair runs either side of the point $\Omega_1 + \Omega_2$, and
 /// is absent where one of the two is a local constant. Only a pair of singular parts has
@@ -205,8 +201,11 @@ fn reach_between(s1: Segment, p1: f64, s2: Segment, p2: f64) -> Segment {
 /// Past a $\rho$ of [`AsymptTerm::MAX_EXPONENT`] the family is left to the
 /// interpolation and the constant is all that comes back, so nothing at all comes back
 /// only where every coefficient vanishes.
-fn convolve_terms(t1: AsymptTerm, t2: AsymptTerm, reach: Option<Segment>) -> Vec<AsymptTerm> {
-    let rho = t1.exponent() + t2.exponent() + 1.0;
+fn convolve_terms(t1: &AsymptTerm, t2: &AsymptTerm, reach: Option<Segment>) -> Vec<AsymptTerm> {
+    // The exponents alone fix $\rho$, so one pair of terms is one family however many
+    // powers of the logarithm the two hold
+    let (r1, r2) = (t1.exponent(), t2.exponent());
+    let rho = r1 + r2 + 1.0;
     // The constant is the ln^0 member of the family at rho = 0.
     // Only a pair of singular parts can reach it: one drawn against a local constant has
     // rho > 0.
@@ -216,7 +215,6 @@ fn convolve_terms(t1: AsymptTerm, t2: AsymptTerm, reach: Option<Segment>) -> Vec
         "rho = 0 needs two singular parts"
     );
 
-    let (cb1, ca1, cb2, ca2) = (t1.sides().0, t1.sides().1, t2.sides().0, t2.sides().1);
     let mut terms = Vec::new();
 
     if rho < AsymptTerm::MAX_EXPONENT {
@@ -227,27 +225,36 @@ fn convolve_terms(t1: AsymptTerm, t2: AsymptTerm, reach: Option<Segment>) -> Vec
         // finite logarithm forces $X_0$ to go as $1/\epsilon$. The generic formula duly
         // returns that pole and the regular part the opposite of it, which is the same
         // cancellation `beta` refuses to hand out, so the width is shared with it.
-        let [mid, lo, hi] = if beta::near_a_whole_exponent(rho) {
-            degenerate_stretches(t1, t2, rho.round() as usize)
-        } else {
-            generic_stretches(t1, t2)
-        };
-        for k in (0..=mid.degree()).rev() {
-            let combine = |x1: f64, x2: f64, x3: f64| {
-                (
-                    cb1 * cb2 * x1 + ca1 * cb2 * x2 + cb1 * ca2 * x3,
-                    ca1 * ca2 * x1 + cb1 * ca2 * x2 + ca1 * cb2 * x3,
-                )
-            };
-            let (mut c_below, mut c_above) = combine(mid.coeff(k), lo.coeff(k), hi.coeff(k));
-            if rho == 0.0 && k == 0 {
-                c_below += constant;
-                c_above += constant;
+        let degenerate = beta::near_a_whole_exponent(rho);
+        let degree = t1.log_degree() + t2.log_degree() + usize::from(degenerate);
+        let (mut below, mut above) = (Polynomial::zeros(degree), Polynomial::zeros(degree));
+
+        // Each stretch is a Beta function of the two exponents differentiated $m_1$ and
+        // $m_2$ times, so the powers of the logarithm pair off one by one and the three
+        // weights are the sides those two powers draw on
+        for (m1, cb1, ca1) in t1.log_coeffs() {
+            for (m2, cb2, ca2) in t2.log_coeffs() {
+                let [mid, lo, hi] = if degenerate {
+                    degenerate_stretches(r1, m1, r2, m2, rho.round() as usize)
+                } else {
+                    generic_stretches(r1, m1, r2, m2)
+                };
+                below.add_scaled(&mid, cb1 * cb2);
+                below.add_scaled(&lo, ca1 * cb2);
+                below.add_scaled(&hi, cb1 * ca2);
+                above.add_scaled(&mid, ca1 * ca2);
+                above.add_scaled(&lo, cb1 * ca2);
+                above.add_scaled(&hi, ca1 * cb2);
             }
-            if c_below == 0.0 && c_above == 0.0 {
-                continue;
-            }
-            terms.push(AsymptTerm::sided_log(rho, k as u8, c_below, c_above));
+        }
+        if rho == 0.0 {
+            below[0] += constant;
+            above[0] += constant;
+        }
+        // A pair whose every coefficient cancels derives nothing at all
+        let family = AsymptTerm::sided_log_poly(rho, below, above);
+        if !family.is_zero() {
+            terms.push(family);
         }
     }
 
@@ -261,12 +268,11 @@ fn convolve_terms(t1: AsymptTerm, t2: AsymptTerm, reach: Option<Segment>) -> Vec
 
 /// What a pair of terms comes to at $\Delta \to 0$ once the $|\Delta|^{\rho}$ family has
 /// gone, with $\rho = r_1 + r_2 + 1$.
-fn coincident_constant(t1: AsymptTerm, t2: AsymptTerm, reach: Segment) -> f64 {
+fn coincident_constant(t1: &AsymptTerm, t2: &AsymptTerm, reach: Segment) -> f64 {
     // The two factors merge into one term of exponent $\rho - 1$, so the pole sits at
-    // an exponent of $-1$
+    // an exponent of $-1$, and that exponent is the same for every pair of powers
     let exponent = t1.exponent() + t2.exponent();
-    let m = t1.log_power() + t2.log_power();
-    let stretch = |c: f64, l: f64| {
+    let stretch = |c: f64, m: u8, l: f64| {
         // A stretch of no length meets a coefficient of no weight, the side a support
         // does not reach having been zeroed already
         if c == 0.0 || l == 0.0 {
@@ -277,14 +283,21 @@ fn coincident_constant(t1: AsymptTerm, t2: AsymptTerm, reach: Segment) -> f64 {
             c * power_log_integral(exponent, m, l)
         }
     };
-    stretch(t1.sides().0 * t2.sides().1, -reach.min())
-        + stretch(t1.sides().1 * t2.sides().0, reach.max())
+
+    let mut total = 0.0;
+    for (m1, cb1, ca1) in t1.log_coeffs() {
+        for (m2, cb2, ca2) in t2.log_coeffs() {
+            let m = (m1 + m2) as u8;
+            total += stretch(cb1 * ca2, m, -reach.min()) + stretch(ca1 * cb2, m, reach.max());
+        }
+    }
+    total
 }
 
 /// What the three stretches contribute to the coefficient of $|\Delta|^\rho\ln^m|\Delta|$,
 /// in the order middle, lower, upper, each indexed by $m$.
 ///
-fn generic_stretches(t1: AsymptTerm, t2: AsymptTerm) -> [Polynomial; 3] {
+fn generic_stretches(r1: f64, m1: usize, r2: f64, m2: usize) -> [Polynomial; 3] {
     // Substituting the length of the stretch out of the integral turns every logarithm
     // into $\ln|\Delta| + O(1)$, and expanding those binomials leaves $|\Delta|^\rho$
     // times a polynomial in $\ln|\Delta|$ of degree $m_1 + m_2$, whose coefficients are
@@ -298,8 +311,6 @@ fn generic_stretches(t1: AsymptTerm, t2: AsymptTerm) -> [Polynomial; 3] {
     //         = \partial_b^j \partial_a^k B^{\mathrm{out}}_\infty(a, b)
     // $$
     // over an outer one, at $a = r_2+1$ and $b = r_1+1$.
-    let (r1, r2) = (t1.exponent(), t2.exponent());
-    let (m1, m2) = (usize::from(t1.log_power()), usize::from(t2.log_power()));
     let outer = |r_own: f64, m_own: usize, r_other: f64, m_other: usize| {
         let table = outer_beta_complete(r_other + 1.0, r_own + 1.0, m_other, m_own);
         derivatives_to_log_coeffs(&table, m_other, m_own)
@@ -323,12 +334,10 @@ fn middle_coefficients(r1: f64, m1: usize, r2: f64, m2: usize) -> Polynomial {
 /// What the three stretches contribute where $\rho$ is a non-negative integer $n$, or
 /// near enough to one that [`beta::WHOLE_EXPONENT_WIDTH`] claims it.
 ///
-fn degenerate_stretches(t1: AsymptTerm, t2: AsymptTerm, n: usize) -> [Polynomial; 3] {
+fn degenerate_stretches(r1: f64, m1: usize, r2: f64, m2: usize, n: usize) -> [Polynomial; 3] {
     // $\Delta^n$ is analytic, and the outer stretches no longer converge: their
     // integrands go as $u^{n-1}$ at large $u$, so one term of the expansion of
     // $(1+1/u)^{r_2}$ integrates to a logarithm rather than a power.
-    let (r1, r2) = (t1.exponent(), t2.exponent());
-    let (m1, m2) = (usize::from(t1.log_power()), usize::from(t2.log_power()));
     let degree = m1 + m2 + 1;
     // Δ^n with no logarithm beside it is analytic. For n ≥ 1 it vanishes at the point along
     // with everything else here, so its coefficient is left to the regular part: the
@@ -508,11 +517,7 @@ impl Part<'_> {
         let reaches_above = position < self.support.max();
         let mut out = Vec::with_capacity(self.sing.terms().len());
         for t in self.sing.terms() {
-            let (c_below, c_above) = t.sides();
-            out.push(t.with_sides(
-                if reaches_below { c_below } else { 0.0 },
-                if reaches_above { c_above } else { 0.0 },
-            ));
+            out.push(t.sides_kept(reaches_below, reaches_above));
         }
         out
     }
@@ -574,11 +579,13 @@ fn singular_singular(first: &Part, second: &Part, segment: Segment) -> f64 {
         (raw, reach, false)
     };
 
-    let sided = |t: &AsymptTerm| {
+    // A flip exchanges the two sides of every term, the integration variable having been
+    // turned to face right
+    let sided = |c_below: f64, c_above: f64| {
         if flipped {
-            (t.sides().1, t.sides().0)
+            (c_above, c_below)
         } else {
-            t.sides()
+            (c_below, c_above)
         }
     };
 
@@ -591,45 +598,50 @@ fn singular_singular(first: &Part, second: &Part, segment: Segment) -> f64 {
     let mut total = 0.0;
     let (terms1, terms2) = (first.sided_terms(), second.sided_terms());
     for t1 in &terms1 {
-        let (m1, r1) = (usize::from(t1.log_power()), t1.exponent());
-        let (below1, above1) = sided(t1);
+        let r1 = t1.exponent();
         for t2 in &terms2 {
-            let (m2, r2) = (usize::from(t2.log_power()), t2.exponent());
-            let (below2, above2) = sided(t2);
+            let r2 = t2.exponent();
+            // The exponents alone fix $\rho$, so every pair of powers below shares it
             let rho = r1 + r2 + 1.0;
-            let mut take = |weight: f64, stretch: StretchContrib| {
-                total +=
-                    weight * (contract_with_ln_m(&stretch.singular, rho, delta) + stretch.regular);
-            };
+            for (m1, cb1, ca1) in t1.log_coeffs() {
+                for (m2, cb2, ca2) in t2.log_coeffs() {
+                    let (below1, above1) = sided(cb1, ca1);
+                    let (below2, above2) = sided(cb2, ca2);
+                    let mut take = |weight: f64, stretch: StretchContrib| {
+                        total += weight
+                            * (contract_with_ln_m(&stretch.singular, rho, delta) + stretch.regular);
+                    };
 
-            // x below zero: the first factor is met from below, the second from above,
-            // and an outer stretch runs away from its point rather than towards it
-            if let Some(s) = stretch_within(reach, below_zero)
-                && below1 != 0.0
-                && above2 != 0.0
-            {
-                take(
-                    below1 * above2,
-                    outer_stretch(r1, m1, r2, m2, delta, s.mirrored(0.0)),
-                );
-            }
-            // between the two points, both factors met from above
-            if let Some(x) = stretch_within(reach, between)
-                && above1 != 0.0
-                && above2 != 0.0
-            {
-                take(above1 * above2, middle_stretch(r1, m1, r2, m2, delta, x));
-            }
-            // past the second point: the first from above, the second from below, the
-            // stretch measured off that second point
-            if let Some(s) = stretch_within(reach, past_delta)
-                && above1 != 0.0
-                && below2 != 0.0
-            {
-                take(
-                    above1 * below2,
-                    outer_stretch(r2, m2, r1, m1, delta, s.shifted(-delta)),
-                );
+                    // x below zero: the first factor is met from below, the second from above,
+                    // and an outer stretch runs away from its point rather than towards it
+                    if let Some(s) = stretch_within(reach, below_zero)
+                        && below1 != 0.0
+                        && above2 != 0.0
+                    {
+                        take(
+                            below1 * above2,
+                            outer_stretch(r1, m1, r2, m2, delta, s.mirrored(0.0)),
+                        );
+                    }
+                    // between the two points, both factors met from above
+                    if let Some(x) = stretch_within(reach, between)
+                        && above1 != 0.0
+                        && above2 != 0.0
+                    {
+                        take(above1 * above2, middle_stretch(r1, m1, r2, m2, delta, x));
+                    }
+                    // past the second point: the first from above, the second from below, the
+                    // stretch measured off that second point
+                    if let Some(s) = stretch_within(reach, past_delta)
+                        && above1 != 0.0
+                        && below2 != 0.0
+                    {
+                        take(
+                            above1 * below2,
+                            outer_stretch(r2, m2, r1, m1, delta, s.shifted(-delta)),
+                        );
+                    }
+                }
             }
         }
     }
@@ -864,13 +876,13 @@ mod tests {
                 reflected: None,
             };
             let mut terms = Vec::new();
-            for &t1 in &first.sided_terms() {
+            for t1 in &first.sided_terms() {
                 let second = Part {
                     sing: sing2,
                     support: s2,
                     reflected: Some(p1 + p2),
                 };
-                for &t2 in &second.sided_terms() {
+                for t2 in &second.sided_terms() {
                     terms.extend(convolve_terms(t1, t2, Some(reach)));
                 }
             }
@@ -935,7 +947,7 @@ mod tests {
         // Two edges going as |ω|^{-3/5} bring ρ to -1/5
         let (r, l) = (-0.6f64, 1.5f64);
         let term = |c_below: f64, c_above: f64| AsymptTerm::sided_log(r, 0, c_below, c_above);
-        let claimed = coincident_constant(term(1.0, 1.0), term(1.0, 1.0), Segment::new(-l, l));
+        let claimed = coincident_constant(&term(1.0, 1.0), &term(1.0, 1.0), Segment::new(-l, l));
 
         // What the stretches set aside as regular, taken nearer and nearer the point.
         // The two outer ones are the same call here, the exponents and the lengths
@@ -1006,8 +1018,8 @@ mod tests {
             0.0,
             1.0,
             convolve_terms(
-                term(1.0, 2.0),
-                term(0.7, 0.3),
+                &term(1.0, 2.0),
+                &term(0.7, 0.3),
                 Some(Segment::new(-1.0, 3.0)),
             ),
         );
