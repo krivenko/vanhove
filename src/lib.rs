@@ -599,9 +599,7 @@ mod tests {
 
     #[test]
     fn continuous_at_cancelling_across_scales() {
-        // Two |ω|^(-1/2) edges at the origin, one of unit width and one four times as
-        // wide. A logarithm is written in units of its scale and a power law is not, so
-        // here the scales have to be folded in before the coefficients can be compared.
+        // Two |ω|^(-1/2) edges at the origin, one of unit width and one four times as wide.
         let (narrow, wide) = (powerlaw(0.0, -0.5, 1.0), powerlaw(0.0, -0.5, 4.0));
 
         // The true coefficients stand as 2 : 1, so this pair cancels and the divergence

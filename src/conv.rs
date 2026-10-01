@@ -18,7 +18,7 @@ use crate::beta::{
     outer_beta_tail,
 };
 use crate::segment::Segment;
-use crate::singularity::{AsymptTerm, Singularity, UnscaledAsymptTerm, power_log_integral};
+use crate::singularity::{AsymptTerm, Singularity, power_log_integral};
 use crate::util::{
     Table, alternating_sign, bilby_integrate_or_0, binomials, integrate_by_subtraction,
     negate_table, subtract_tables,
@@ -77,7 +77,7 @@ pub fn pair_support(c1: &dyn ContinuousSF, c2: &dyn ContinuousSF) -> Segment {
 /// $\omega - \nu = \Omega_2$ hold together. The positions are therefore the pairwise sums,
 /// and the ends of a support count too: that is where a factor stops contributing at all.
 ///
-/// Every pair of unscaled terms is convolved but one: the two constants. That product is
+/// Every pair of terms is convolved but one: the two constants. That product is
 /// $R \ast R$, which leaves a kink going as $|\Delta|$ or milder - a polynomial either
 /// side of the panel boundary it sits on, and fitted there exactly.
 ///
@@ -90,7 +90,7 @@ pub fn pair_singularities(c1: &dyn ContinuousSF, c2: &dyn ContinuousSF) -> Vec<S
     let forms = |csf: &dyn ContinuousSF| -> Vec<(f64, LocalForm)> {
         features(csf)
             .into_iter()
-            .map(|p| (p, unscaled_form_at(csf, p)))
+            .map(|p| (p, local_form_at(csf, p)))
             .collect()
     };
     let (forms1, forms2) = (forms(c1), forms(c2));
@@ -141,7 +141,7 @@ fn features(csf: &dyn ContinuousSF) -> Vec<f64> {
 
 /// The terms of a singularity sitting at a feature, and the value everything else takes
 /// there.
-type LocalForm = (Vec<UnscaledAsymptTerm>, UnscaledAsymptTerm);
+type LocalForm = (Vec<AsymptTerm>, AsymptTerm);
 
 /// How `csf` reads about `position`, in powers of $|\omega - \text{position}|$: the
 /// terms of a singularity sitting there, and the value everything else takes, kept
@@ -149,30 +149,29 @@ type LocalForm = (Vec<UnscaledAsymptTerm>, UnscaledAsymptTerm);
 ///
 /// Each is zeroed on the side the support does not reach. Without that a band edge would
 /// convolve as though the band ran on through it.
-fn unscaled_form_at(csf: &dyn ContinuousSF, position: f64) -> LocalForm {
+fn local_form_at(csf: &dyn ContinuousSF, position: f64) -> LocalForm {
     let support = csf.support();
     let (reaches_below, reaches_above) = (position > support.min(), position < support.max());
-    let sided = |exponent, log_power, c_below: f64, c_above: f64| UnscaledAsymptTerm {
-        exponent,
-        log_power,
-        c_below: if reaches_below { c_below } else { 0.0 },
-        c_above: if reaches_above { c_above } else { 0.0 },
+    let sided = |t: &AsymptTerm| {
+        let (c_below, c_above) = t.sides();
+        t.with_sides(
+            if reaches_below { c_below } else { 0.0 },
+            if reaches_above { c_above } else { 0.0 },
+        )
     };
 
     let mut singular = Vec::new();
     let mut constant = csf.regular(position);
     for sing in csf.singularities() {
         if sing.position() == position {
-            singular.extend(
-                sing.unscaled_terms()
-                    .into_iter()
-                    .map(|t| sided(t.exponent, t.log_power, t.c_below, t.c_above)),
-            );
+            for t in sing.terms() {
+                singular.push(sided(t));
+            }
         } else {
             constant += sing.value(position);
         }
     }
-    (singular, sided(0.0, 0, constant, constant))
+    (singular, sided(&AsymptTerm::power(0.0, constant)))
 }
 
 /// The range of $x = \nu - p_1$ where a feature `p1` of `s1`
@@ -205,12 +204,8 @@ fn reach_between(s1: Segment, p1: f64, s2: Segment, p2: f64) -> Segment {
 /// Past a $\rho$ of [`AsymptTerm::MAX_EXPONENT`] the family is left to the
 /// interpolation and the constant is all that comes back, so nothing at all comes back
 /// only where every coefficient vanishes.
-fn convolve_terms(
-    t1: UnscaledAsymptTerm,
-    t2: UnscaledAsymptTerm,
-    reach: Option<Segment>,
-) -> Vec<AsymptTerm> {
-    let rho = t1.exponent + t2.exponent + 1.0;
+fn convolve_terms(t1: AsymptTerm, t2: AsymptTerm, reach: Option<Segment>) -> Vec<AsymptTerm> {
+    let rho = t1.exponent() + t2.exponent() + 1.0;
     // The constant is the ln^0 member of the family at rho = 0.
     // Only a pair of singular parts can reach it: one drawn against a local constant has
     // rho > 0.
@@ -220,7 +215,7 @@ fn convolve_terms(
         "rho = 0 needs two singular parts"
     );
 
-    let (cb1, ca1, cb2, ca2) = (t1.c_below, t1.c_above, t2.c_below, t2.c_above);
+    let (cb1, ca1, cb2, ca2) = (t1.sides().0, t1.sides().1, t2.sides().0, t2.sides().1);
     let mut terms = Vec::new();
 
     if rho < AsymptTerm::MAX_EXPONENT {
@@ -265,11 +260,11 @@ fn convolve_terms(
 
 /// What a pair of terms comes to at $\Delta \to 0$ once the $|\Delta|^{\rho}$ family has
 /// gone, with $\rho = r_1 + r_2 + 1$.
-fn coincident_constant(t1: UnscaledAsymptTerm, t2: UnscaledAsymptTerm, reach: Segment) -> f64 {
+fn coincident_constant(t1: AsymptTerm, t2: AsymptTerm, reach: Segment) -> f64 {
     // The two factors merge into one term of exponent $\rho - 1$, so the pole sits at
     // an exponent of $-1$
-    let exponent = t1.exponent + t2.exponent;
-    let m = t1.log_power + t2.log_power;
+    let exponent = t1.exponent() + t2.exponent();
+    let m = t1.log_power() + t2.log_power();
     let stretch = |c: f64, l: f64| {
         // A stretch of no length meets a coefficient of no weight, the side a support
         // does not reach having been zeroed already
@@ -281,13 +276,14 @@ fn coincident_constant(t1: UnscaledAsymptTerm, t2: UnscaledAsymptTerm, reach: Se
             c * power_log_integral(exponent, m, l)
         }
     };
-    stretch(t1.c_below * t2.c_above, -reach.min()) + stretch(t1.c_above * t2.c_below, reach.max())
+    stretch(t1.sides().0 * t2.sides().1, -reach.min())
+        + stretch(t1.sides().1 * t2.sides().0, reach.max())
 }
 
 /// What the three stretches contribute to the coefficient of $|\Delta|^\rho\ln^m|\Delta|$,
 /// in the order middle, lower, upper, each indexed by $m$.
 ///
-fn generic_stretches(t1: UnscaledAsymptTerm, t2: UnscaledAsymptTerm) -> [Vec<f64>; 3] {
+fn generic_stretches(t1: AsymptTerm, t2: AsymptTerm) -> [Vec<f64>; 3] {
     // Substituting the length of the stretch out of the integral turns every logarithm
     // into $\ln|\Delta| + O(1)$, and expanding those binomials leaves $|\Delta|^\rho$
     // times a polynomial in $\ln|\Delta|$ of degree $m_1 + m_2$, whose coefficients are
@@ -301,8 +297,8 @@ fn generic_stretches(t1: UnscaledAsymptTerm, t2: UnscaledAsymptTerm) -> [Vec<f64
     //         = \partial_b^j \partial_a^k B^{\mathrm{out}}_\infty(a, b)
     // $$
     // over an outer one, at $a = r_2+1$ and $b = r_1+1$.
-    let (r1, r2) = (t1.exponent, t2.exponent);
-    let (m1, m2) = (usize::from(t1.log_power), usize::from(t2.log_power));
+    let (r1, r2) = (t1.exponent(), t2.exponent());
+    let (m1, m2) = (usize::from(t1.log_power()), usize::from(t2.log_power()));
     let outer = |r_own: f64, m_own: usize, r_other: f64, m_other: usize| {
         let table = outer_beta_complete(r_other + 1.0, r_own + 1.0, m_other, m_own);
         derivatives_to_log_coeffs(&table, m_other, m_own)
@@ -326,12 +322,12 @@ fn middle_coefficients(r1: f64, m1: usize, r2: f64, m2: usize) -> Vec<f64> {
 /// What the three stretches contribute where $\rho$ is a non-negative integer $n$, or
 /// near enough to one that [`beta::WHOLE_EXPONENT_WIDTH`] claims it.
 ///
-fn degenerate_stretches(t1: UnscaledAsymptTerm, t2: UnscaledAsymptTerm, n: usize) -> [Vec<f64>; 3] {
+fn degenerate_stretches(t1: AsymptTerm, t2: AsymptTerm, n: usize) -> [Vec<f64>; 3] {
     // $\Delta^n$ is analytic, and the outer stretches no longer converge: their
     // integrands go as $u^{n-1}$ at large $u$, so one term of the expansion of
     // $(1+1/u)^{r_2}$ integrates to a logarithm rather than a power.
-    let (r1, r2) = (t1.exponent, t2.exponent);
-    let (m1, m2) = (usize::from(t1.log_power), usize::from(t2.log_power));
+    let (r1, r2) = (t1.exponent(), t2.exponent());
+    let (m1, m2) = (usize::from(t1.log_power()), usize::from(t2.log_power()));
     let degree = m1 + m2 + 1;
     // Δ^n with no logarithm beside it is analytic. For n ≥ 1 it vanishes at the point along
     // with everything else here, so its coefficient is left to the regular part: the
@@ -505,19 +501,19 @@ impl Part<'_> {
     }
 
     /// The singularity's terms with the side its support does not reach zeroed.
-    fn sided_terms(&self) -> Vec<UnscaledAsymptTerm> {
+    fn sided_terms(&self) -> Vec<AsymptTerm> {
         let position = self.sing.position();
         let reaches_below = position > self.support.min();
         let reaches_above = position < self.support.max();
-        self.sing
-            .unscaled_terms()
-            .into_iter()
-            .map(|t| UnscaledAsymptTerm {
-                c_below: if reaches_below { t.c_below } else { 0.0 },
-                c_above: if reaches_above { t.c_above } else { 0.0 },
-                ..t
-            })
-            .collect()
+        let mut out = Vec::with_capacity(self.sing.terms().len());
+        for t in self.sing.terms() {
+            let (c_below, c_above) = t.sides();
+            out.push(t.with_sides(
+                if reaches_below { c_below } else { 0.0 },
+                if reaches_above { c_above } else { 0.0 },
+            ));
+        }
+        out
     }
 
     /// $\int S$ over a stretch of the $\nu$ axis, in closed form.
@@ -577,11 +573,11 @@ fn singular_singular(first: &Part, second: &Part, segment: Segment) -> f64 {
         (raw, reach, false)
     };
 
-    let sided = |t: &UnscaledAsymptTerm| {
+    let sided = |t: &AsymptTerm| {
         if flipped {
-            (t.c_above, t.c_below)
+            (t.sides().1, t.sides().0)
         } else {
-            (t.c_below, t.c_above)
+            t.sides()
         }
     };
 
@@ -594,10 +590,10 @@ fn singular_singular(first: &Part, second: &Part, segment: Segment) -> f64 {
     let mut total = 0.0;
     let (terms1, terms2) = (first.sided_terms(), second.sided_terms());
     for t1 in &terms1 {
-        let (m1, r1) = (usize::from(t1.log_power), t1.exponent);
+        let (m1, r1) = (usize::from(t1.log_power()), t1.exponent());
         let (below1, above1) = sided(t1);
         for t2 in &terms2 {
-            let (m2, r2) = (usize::from(t2.log_power), t2.exponent);
+            let (m2, r2) = (usize::from(t2.log_power()), t2.exponent());
             let (below2, above2) = sided(t2);
             let rho = r1 + r2 + 1.0;
             let mut take = |weight: f64, stretch: StretchContrib| {
@@ -943,12 +939,7 @@ mod tests {
     fn the_constant_continues_below_rho_zero() {
         // Two edges going as |ω|^{-3/5} bring ρ to -1/5
         let (r, l) = (-0.6f64, 1.5f64);
-        let term = |c_below: f64, c_above: f64| UnscaledAsymptTerm {
-            exponent: r,
-            log_power: 0,
-            c_below,
-            c_above,
-        };
+        let term = |c_below: f64, c_above: f64| AsymptTerm::sided_log(r, 0, c_below, c_above);
         let claimed = coincident_constant(term(1.0, 1.0), term(1.0, 1.0), Segment::new(-l, l));
 
         // What the stretches set aside as regular, taken nearer and nearer the point.
@@ -1015,12 +1006,7 @@ mod tests {
     /// the whole reason an [`AsymptTerm`] may hold a bare constant per side.
     #[test]
     fn the_constant_a_pair_leaves_is_sided() {
-        let term = |c_below: f64, c_above: f64| UnscaledAsymptTerm {
-            exponent: -0.5,
-            log_power: 0,
-            c_below,
-            c_above,
-        };
+        let term = |c_below: f64, c_above: f64| AsymptTerm::sided_log(-0.5, 0, c_below, c_above);
         let pair = Singularity::new(
             0.0,
             1.0,
