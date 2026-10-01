@@ -7,6 +7,7 @@ mod conv;
 pub mod discrete;
 pub mod interp;
 pub mod models;
+mod polynomial;
 pub mod segment;
 pub mod singularity;
 mod util;

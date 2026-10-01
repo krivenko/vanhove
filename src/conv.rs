@@ -17,6 +17,7 @@ use crate::beta::{
     outer_beta_derivatives, outer_beta_derivatives_split, outer_beta_entire_factor,
     outer_beta_tail,
 };
+use crate::polynomial::Polynomial;
 use crate::segment::Segment;
 use crate::singularity::{AsymptTerm, Singularity, power_log_integral};
 use crate::util::{
@@ -37,13 +38,13 @@ use crate::util::{
 /// `j_max` counts the derivatives on the table's first index and `k_max` those on its
 /// second. For an outer stretch that is the order the outer Beta's parameters come in,
 /// $a = r_2+1$ before $b = r_1+1$, and not the order of the two factors.
-fn derivatives_to_log_coeffs(table: &Table, j_max: usize, k_max: usize) -> Vec<f64> {
+fn derivatives_to_log_coeffs(table: &Table, j_max: usize, k_max: usize) -> Polynomial {
     // All stretches scale their range by $\Delta = \omega-(\Omega_p+\Omega_q)$, so
     // restoring the coefficients of $\ln^m|\Delta|$ from the derivative table of a
     // dimensionless function is the general Leibniz rule
     let degree = j_max + k_max;
     let (c_row1, c_row2) = (binomials(j_max), binomials(k_max));
-    let mut out = vec![0.0; degree + 1];
+    let mut out = Polynomial::zeros(degree);
     for (j, &c1) in c_row1.iter().enumerate() {
         for (k, &c2) in c_row2.iter().enumerate() {
             out[degree - j - k] += c1 * c2 * table[j][k];
@@ -231,14 +232,14 @@ fn convolve_terms(t1: AsymptTerm, t2: AsymptTerm, reach: Option<Segment>) -> Vec
         } else {
             generic_stretches(t1, t2)
         };
-        for k in (0..mid.len()).rev() {
+        for k in (0..=mid.degree()).rev() {
             let combine = |x1: f64, x2: f64, x3: f64| {
                 (
                     cb1 * cb2 * x1 + ca1 * cb2 * x2 + cb1 * ca2 * x3,
                     ca1 * ca2 * x1 + cb1 * ca2 * x2 + ca1 * cb2 * x3,
                 )
             };
-            let (mut c_below, mut c_above) = combine(mid[k], lo[k], hi[k]);
+            let (mut c_below, mut c_above) = combine(mid.coeff(k), lo.coeff(k), hi.coeff(k));
             if rho == 0.0 && k == 0 {
                 c_below += constant;
                 c_above += constant;
@@ -283,7 +284,7 @@ fn coincident_constant(t1: AsymptTerm, t2: AsymptTerm, reach: Segment) -> f64 {
 /// What the three stretches contribute to the coefficient of $|\Delta|^\rho\ln^m|\Delta|$,
 /// in the order middle, lower, upper, each indexed by $m$.
 ///
-fn generic_stretches(t1: AsymptTerm, t2: AsymptTerm) -> [Vec<f64>; 3] {
+fn generic_stretches(t1: AsymptTerm, t2: AsymptTerm) -> [Polynomial; 3] {
     // Substituting the length of the stretch out of the integral turns every logarithm
     // into $\ln|\Delta| + O(1)$, and expanding those binomials leaves $|\Delta|^\rho$
     // times a polynomial in $\ln|\Delta|$ of degree $m_1 + m_2$, whose coefficients are
@@ -315,14 +316,14 @@ fn generic_stretches(t1: AsymptTerm, t2: AsymptTerm) -> [Vec<f64>; 3] {
 ///
 /// $a$ and $b$ are both positive whatever $\rho$ comes to, so this is the one stretch that
 /// never meets a pole, and it is used at a whole-number $\rho$ unchanged.
-fn middle_coefficients(r1: f64, m1: usize, r2: f64, m2: usize) -> Vec<f64> {
+fn middle_coefficients(r1: f64, m1: usize, r2: f64, m2: usize) -> Polynomial {
     derivatives_to_log_coeffs(&beta_derivatives(r1 + 1.0, r2 + 1.0, m1, m2), m1, m2)
 }
 
 /// What the three stretches contribute where $\rho$ is a non-negative integer $n$, or
 /// near enough to one that [`beta::WHOLE_EXPONENT_WIDTH`] claims it.
 ///
-fn degenerate_stretches(t1: AsymptTerm, t2: AsymptTerm, n: usize) -> [Vec<f64>; 3] {
+fn degenerate_stretches(t1: AsymptTerm, t2: AsymptTerm, n: usize) -> [Polynomial; 3] {
     // $\Delta^n$ is analytic, and the outer stretches no longer converge: their
     // integrands go as $u^{n-1}$ at large $u$, so one term of the expansion of
     // $(1+1/u)^{r_2}$ integrates to a logarithm rather than a power.
@@ -334,8 +335,8 @@ fn degenerate_stretches(t1: AsymptTerm, t2: AsymptTerm, n: usize) -> [Vec<f64>; 
     // closed form computes the convolution whole and what the asymptotics does not claim
     // stays there exactly. At n = 0 there is nothing analytic about it - it is the
     // constant the pair leaves behind, and it is derived along with the logarithms.
-    let pad = |mut v: Vec<f64>| {
-        v.resize(degree + 1, 0.0);
+    let pad = |mut v: Polynomial| {
+        v.resize(degree);
         if n > 0 {
             v[0] = 0.0;
         }
@@ -358,7 +359,7 @@ fn degenerate_stretches(t1: AsymptTerm, t2: AsymptTerm, n: usize) -> [Vec<f64>; 
 ///
 /// The $\ln^0$ coefficient comes back as the $\epsilon^0$ part alone. What goes with it
 /// is the stretch's own length, and that is [`coincident_constant()`]'s to add.
-fn outer_stretch_logs(r_own: f64, m_own: usize, m_other: usize, n: usize) -> Vec<f64> {
+fn outer_stretch_logs(r_own: f64, m_own: usize, m_other: usize, n: usize) -> Polynomial {
     // At a whole number the generic formula loses its finite parts to a pole of
     // $\Gamma(-\rho)$, but not its content: writing $\rho = n + \epsilon$ makes
     // $|\Delta|^\rho = |\Delta|^n e^{\epsilon\ln|\Delta|}$, so a pole of order $p$
@@ -385,7 +386,7 @@ fn outer_stretch_logs(r_own: f64, m_own: usize, m_other: usize, n: usize) -> Vec
     let (c_row_own, c_row_other) = (binomials(m_own), binomials(m_other));
     let factorial = |p: usize| Gamma::gamma(p as f64 + 1.0);
 
-    let mut out = vec![0.0; degree + 2];
+    let mut out = Polynomial::zeros(degree + 1);
     for (j, &c1) in c_row_own.iter().enumerate() {
         let c_row_inner = binomials(j);
         for (k, &c2) in c_row_other.iter().enumerate() {
@@ -647,7 +648,7 @@ fn stretch_within(reach: Segment, region: Segment) -> Option<Segment> {
 /// $\Delta = 0$. Their sum is the integral over the stretch.
 struct StretchContrib {
     /// $c_m$, indexed by the power of $\ln|\Delta|$.
-    singular: Vec<f64>,
+    singular: Polynomial,
     /// Everything else, evaluated at this $\Delta$.
     regular: f64,
 }
@@ -656,7 +657,7 @@ impl StretchContrib {
     /// A stretch whose beta could not be divided, all of it counted as regular.
     fn undivided(degree: usize, value: f64) -> StretchContrib {
         StretchContrib {
-            singular: vec![0.0; degree + 1],
+            singular: Polynomial::zeros(degree),
             regular: value,
         }
     }
@@ -693,7 +694,7 @@ fn outer_stretch(r1: f64, m1: usize, r2: f64, m2: usize, delta: f64, s: Segment)
         )
     } else {
         let near = outer_beta_tail(a, b, u(s.min()), &complete, m2, m1);
-        (vec![0.0; degree + 1], subtract_tables(&near, &far))
+        (Polynomial::zeros(degree), subtract_tables(&near, &far))
     };
     let regular = contract_with_ln_m(&derivatives_to_log_coeffs(&rest, m2, m1), rho, delta);
     StretchContrib { singular, regular }
@@ -738,21 +739,15 @@ fn middle_stretch(
     } else {
         let (_, near) = inc_beta_derivatives_split(a, b, x.min() / delta, m1, m2)
             .expect("the far end already split, so the near one does too");
-        (vec![0.0; degree + 1], subtract_tables(&near, &far))
+        (Polynomial::zeros(degree), subtract_tables(&near, &far))
     };
     let regular = contract_with_ln_m(&derivatives_to_log_coeffs(&rest, m1, m2), rho, delta);
     StretchContrib { singular, regular }
 }
 
 /// $|\Delta|^{\rho}\sum_m c_m \ln^m|\Delta|$.
-fn contract_with_ln_m(coefficients: &[f64], rho: f64, delta: f64) -> f64 {
-    let ln_delta = delta.ln();
-    let sum: f64 = coefficients
-        .iter()
-        .enumerate()
-        .map(|(m, c)| c * ln_delta.powi(m as i32))
-        .sum();
-    delta.powf(rho) * sum
+fn contract_with_ln_m(coefficients: &Polynomial, rho: f64, delta: f64) -> f64 {
+    delta.powf(rho) * coefficients.eval(delta.ln())
 }
 
 #[cfg(test)]
@@ -984,7 +979,7 @@ mod tests {
 
                 // The singular part is the whole of what reaches |Δ|^ρ, and knows
                 // nothing of Δ or of how far the stretch runs
-                assert_eq!(got.singular.len(), 1);
+                assert_eq!(got.singular.degree(), 0);
                 assert_relative_eq!(got.singular[0], singular, max_relative = 1e-12);
 
                 // The regular part is the background, exact at this Δ rather than a
