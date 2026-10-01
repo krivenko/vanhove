@@ -518,6 +518,10 @@ pub fn outer_beta_derivatives(a: f64, b: f64, u_max: f64, j_max: usize, k_max: u
 /// Table of $\partial_a^j \partial_b^k B(b, -\rho)$ at $\rho = a+b-1$: the complete beta,
 /// written in the outer beta's own parameters.
 ///
+/// This is $B^{\mathrm{out}}_U$ at an infinite $U$ only for $\rho < 0$. The integral
+/// diverges for every $\rho \ge 0$, logarithmically already at $\rho = 0$, and what the
+/// table holds past that is its continuation in $\rho$, which need not be positive.
+///
 /// At a whole $\rho \ge 0$ it is no number at all as $B(b, -\rho)$ has a pole there.
 pub fn outer_beta_complete(a: f64, b: f64, j_max: usize, k_max: usize) -> Table {
     assert!(b > 0.0, "the outer beta needs b > 0 to converge at u = 0");
@@ -570,11 +574,12 @@ pub fn outer_beta_derivatives_split(
     Some((complete, tail))
 }
 
-/// Table of $\partial_a^j \partial_b^k$ of the amount by which
-/// [`outer_beta_complete()`] exceeds $B^{\mathrm{out}}_U(a,b)$, at $U =$ `u_min`.
+/// Table of $\partial_a^j \partial_b^k [B(b, -\rho) - B^{\mathrm{out}}_U(a,b)]$ at
+/// $U =$ `u_min`.
 ///
-/// `complete` is [`outer_beta_complete()`] at the same parameters. It does not depend on
-/// the range, so a caller taking several tails of one outer beta computes it once.
+/// `complete` is that $B(b, -\rho)$, [`outer_beta_complete()`] at the same parameters.
+/// It does not depend on the range, so a caller taking several tails of one outer beta
+/// computes it once.
 pub fn outer_beta_tail(
     a: f64,
     b: f64,
@@ -585,7 +590,7 @@ pub fn outer_beta_tail(
 ) -> Table {
     // Past the cut the tail is the expansion in $y$ over $(0, 1/(1+U)]$. Short of the
     // cut that expansion does not reach, and the tail is the complete value less the
-    // range instead.
+    // integral over the range instead.
     if u_min >= 1.0 {
         let l1 = (1.0 / (1.0 + u_min)).ln();
         return outer_beta_far_half(a, b, j_max, k_max, f64::NEG_INFINITY, l1);
