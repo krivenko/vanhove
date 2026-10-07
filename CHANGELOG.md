@@ -18,6 +18,9 @@ All notable changes to this project will be documented in this file.
   part in closed form, `interp::InterpolatedSF`, and
   `SpectralFunction::from_continuous()`. A model defined outside the crate can
   now be turned into a spectral function.
+- `SpectralFunction::shifted()` and `SpectralFunction::mirrored()` displace a
+  spectral function in frequency and reflect it, `A(omega - nu)`. The same pair
+  of methods is added to `DiscreteSF`, `Singularity` and `trait ContinuousSF`.
 - `SpectralFunction::continuous()` lists the continuous contributions with their
   weights.
 - `SpectralFunction` is `Send` and `Sync`, so that frequency scans can be spread

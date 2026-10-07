@@ -109,6 +109,12 @@ impl AsymptTerm {
         )
     }
 
+    /// The same term with its two sides exchanged, as a reflection of the frequency
+    /// axis about $\Omega_p$ leaves it.
+    pub(crate) fn mirrored(&self) -> AsymptTerm {
+        AsymptTerm::make(self.exponent, self.above.clone(), self.below.clone())
+    }
+
     /// Highest power of the logarithm the term reaches on either side.
     pub(crate) fn log_degree(&self) -> usize {
         self.below.degree().max(self.above.degree())
@@ -312,6 +318,14 @@ impl Singularity {
         Singularity {
             position: self.position + by,
             ..self.clone()
+        }
+    }
+
+    /// The image of the singularity under the reflection $\nu \mapsto \omega - \nu$.
+    pub fn mirrored(&self, omega: f64) -> Singularity {
+        Singularity {
+            position: omega - self.position,
+            terms: self.terms.iter().map(AsymptTerm::mirrored).collect(),
         }
     }
 
@@ -527,6 +541,43 @@ mod tests {
         // A symmetric term is the same read from either side
         let plain = Singularity::new(0.0, 1.0, vec![AsymptTerm::power(1.0, 3.0)]);
         assert_eq!(plain.value(-2.0), plain.value(2.0));
+    }
+
+    #[test]
+    fn mirrored() {
+        // Sides that differ in every term, so that a swap left undone shows
+        let sing = Singularity::new(
+            0.3,
+            2.0,
+            vec![
+                AsymptTerm::sided_log(-0.5, 0, 1.0, 2.5),
+                AsymptTerm::sided_log(0.5, 2, -0.7, 0.4),
+            ],
+        );
+        let omega = 1.1;
+        let image = sing.mirrored(omega);
+        assert_eq!(image.position(), omega - 0.3);
+        for nu in [-1.5, -0.2, 0.25, 0.9, 2.0] {
+            assert_relative_eq!(
+                image.value(nu),
+                sing.value(omega - nu),
+                max_relative = 1e-14
+            );
+        }
+
+        let support = Segment::new(-1.0, 2.0);
+        assert_relative_eq!(
+            image.integral(support.mirrored(omega)),
+            sing.integral(support),
+            max_relative = 1e-14
+        );
+
+        // Reflecting twice about the same point gives the singularity back
+        let twice = image.mirrored(omega);
+        assert_relative_eq!(twice.position(), 0.3, max_relative = 1e-15);
+        for nu in [-1.5, 0.25, 2.0] {
+            assert_relative_eq!(twice.value(nu), sing.value(nu), max_relative = 1e-14);
+        }
     }
 
     #[test]

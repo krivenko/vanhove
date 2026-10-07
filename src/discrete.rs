@@ -241,6 +241,26 @@ impl DiscreteSF {
         util::kahan_babushka_neumaier_sum(self.iter().map(|r| r.weight))
     }
 
+    /// The same spectral function displaced in frequency by `by`.
+    pub fn shifted(&self, by: f64) -> DiscreteSF {
+        self.iter()
+            .map(|r| Resonance {
+                eps: r.eps + by,
+                weight: r.weight,
+            })
+            .collect()
+    }
+
+    /// The image of the spectral function under the reflection $\nu \mapsto \omega - \nu$.
+    pub fn mirrored(&self, omega: f64) -> DiscreteSF {
+        self.iter()
+            .map(|r| Resonance {
+                eps: omega - r.eps,
+                weight: r.weight,
+            })
+            .collect()
+    }
+
     /// Convolution with another discrete spectral function,
     /// $\int D_A(\nu) D_B(\omega - \nu) d\nu$.
     pub fn conv(&self, other: &DiscreteSF) -> DiscreteSF {

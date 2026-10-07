@@ -58,20 +58,23 @@ pub mod theory {}
 /// use vanhove::{ContinuousSF, SpectralFunction};
 ///
 /// struct SqrtBand {
-///     eps: f64,
+///     support: Segment,
 ///     edge: [Singularity; 1],
 /// }
 ///
 /// impl SqrtBand {
 ///     fn new(eps: f64) -> SqrtBand {
 ///         let terms = vec![AsymptTerm::power(0.5, 1.5)];
-///         SqrtBand { eps, edge: [Singularity::new(eps, 1.0, terms)] }
+///         SqrtBand {
+///             support: Segment::new(eps, eps + 1.0),
+///             edge: [Singularity::new(eps, 1.0, terms)],
+///         }
 ///     }
 /// }
 ///
 /// impl ContinuousSF for SqrtBand {
 ///     fn support(&self) -> Segment {
-///         Segment::new(self.eps, self.eps + 1.0)
+///         self.support
 ///     }
 ///     // The whole of A(ω) is the singular part, so nothing is left over
 ///     fn regular(&self, _omega: f64) -> f64 {
@@ -81,7 +84,16 @@ pub mod theory {}
 ///         &self.edge
 ///     }
 ///     fn shifted(&self, by: f64) -> Box<dyn ContinuousSF> {
-///         Box::new(SqrtBand::new(self.eps + by))
+///         Box::new(SqrtBand {
+///             support: self.support.shifted(by),
+///             edge: [self.edge[0].shifted(by)],
+///         })
+///     }
+///     fn mirrored(&self, omega: f64) -> Box<dyn ContinuousSF> {
+///         Box::new(SqrtBand {
+///             support: self.support.mirrored(omega),
+///             edge: [self.edge[0].mirrored(omega)],
+///         })
 ///     }
 /// }
 ///
@@ -90,6 +102,10 @@ pub mod theory {}
 /// // The band is normalized, and its first moment is 3/5
 /// assert!((dos.integrate(|_| 1.0, None).unwrap().value - 1.0).abs() < 1e-12);
 /// assert!((dos.integrate(|omega| omega, None).unwrap().value - 0.6).abs() < 1e-12);
+///
+/// // Reflected about the origin, it falls into an upper edge at 0 instead
+/// let image = dos.mirrored(0.0);
+/// assert!((image.integrate(|omega| omega, None).unwrap().value + 0.6).abs() < 1e-12);
 ///
 /// // It convolves like any model of the crate's own, the singular structure of the
 /// // result derived from the band edge it was given
@@ -117,6 +133,9 @@ pub trait ContinuousSF: Send + Sync {
     }
     /// The same spectral function displaced in frequency by `by`.
     fn shifted(&self, by: f64) -> Box<dyn ContinuousSF>;
+    /// The image of the spectral function under the reflection $\nu \mapsto \omega - \nu$,
+    /// $A(\omega - \nu)$ as a function of $\nu$.
+    fn mirrored(&self, omega: f64) -> Box<dyn ContinuousSF>;
 }
 
 /// Spectral function as a weighted sum of discrete resonances and continuous
@@ -311,6 +330,25 @@ impl SpectralFunction {
                 .map(|(cd, _)| cd.support())
                 .chain(self.discrete.support()),
         )
+    }
+
+    /// The same spectral function displaced in frequency by `by`.
+    pub fn shifted(&self, by: f64) -> SpectralFunction {
+        let mut continuous = Vec::with_capacity(self.continuous.len());
+        for (csf, w) in &self.continuous {
+            continuous.push((Arc::from(csf.shifted(by)), *w));
+        }
+        SpectralFunction::from_discrete_continuous(self.discrete.shifted(by), continuous)
+    }
+
+    /// The image of the spectral function under the reflection $\nu \mapsto \omega - \nu$,
+    /// $A(\omega - \nu)$ as a function of $\nu$.
+    pub fn mirrored(&self, omega: f64) -> SpectralFunction {
+        let mut continuous = Vec::with_capacity(self.continuous.len());
+        for (csf, w) in &self.continuous {
+            continuous.push((Arc::from(csf.mirrored(omega)), *w));
+        }
+        SpectralFunction::from_discrete_continuous(self.discrete.mirrored(omega), continuous)
     }
 
     /// Replace the regular part of every continuous contribution with a Chebyshev
@@ -1012,6 +1050,120 @@ mod tests {
                 moved.total_weight(),
                 dos.total_weight(),
                 max_relative = 1e-14
+            );
+        }
+    }
+
+    #[test]
+    fn mirrored_every_model() {
+        // Reflecting must carry the support, regular part and singular points over to
+        // A(ω - ν), whichever side of a singular point each term was given for. The
+        // reflection rounds, so a vanishing value is met to an absolute floor.
+        let omega = 0.3f64;
+        let models = [
+            chain(0.5, 1.0),
+            semicircle(0.5, 2.0),
+            bethe(4, 0.5, 1.0),
+            powerlaw(0.5, -0.5, 2.0),
+            powerlaw(0.5, 2.5, 2.0),
+            pseudogap(0.5, 0.5, 2.0),
+            pseudogap(0.5, 2.5, 2.0),
+            square(0.5, 1.0),
+            triangular(0.5, 1.0),
+            triangular(0.5, -1.0),
+            honeycomb(0.5, 1.0),
+            lieb(0.5, 1.0),
+            kagome(0.5, 1.0),
+            gaussian(0.5, 1.0),
+            flat(0.5, 2.0, 0.0),
+            flat(0.5, 2.0, 0.3),
+            triangular(0.5, 1.0).precomputed(None),
+            powerlaw(0.5, -0.5, 2.0).conv(&chain(0.0, 1.0), None),
+            2.0 * discrete(&[-0.7, 1.2], &[0.25, 0.6]) + 5.0 * gaussian(1.4, 0.5),
+        ];
+        for dos in models {
+            let image = dos.mirrored(omega);
+            let support = dos.support().unwrap();
+            assert_eq!(image.support().unwrap(), support.mirrored(omega));
+            let (lo, hi) = (support.min().max(-20.0), support.max().min(20.0));
+            // The ends are left out: where A(ω) steps there, its value at the step is
+            // read from above, and the reflection turns a lower end into an upper one
+            for i in 1..40 {
+                let nu = lo + (hi - lo) * (i as f64) / 40.0;
+                assert_relative_eq!(
+                    image.continuous_at(omega - nu),
+                    dos.continuous_at(nu),
+                    max_relative = 1e-12,
+                    epsilon = 1e-14
+                );
+            }
+            for (csf, _) in image.continuous() {
+                let positions: Vec<f64> =
+                    csf.singularities().iter().map(|s| s.position()).collect();
+                assert!(positions.is_sorted(), "singular points out of order");
+            }
+
+            // The zeroth moment stays and the first one turns about omega
+            let moment = |sf: &SpectralFunction, n: i32| {
+                sf.integrate(|w: f64| w.powi(n), None).unwrap().value
+            };
+            assert_relative_eq!(moment(&image, 0), moment(&dos, 0), max_relative = 1e-10);
+            assert_relative_eq!(
+                moment(&image, 1),
+                omega * moment(&dos, 0) - moment(&dos, 1),
+                max_relative = 1e-9,
+                epsilon = 1e-10
+            );
+
+            // Reflecting twice about the same point is the identity
+            let back = image.mirrored(omega);
+            for i in 1..40 {
+                let nu = lo + (hi - lo) * (i as f64) / 40.0;
+                assert_relative_eq!(
+                    back.continuous_at(nu),
+                    dos.continuous_at(nu),
+                    max_relative = 1e-12,
+                    epsilon = 1e-14
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn shifted_spectral_function() {
+        let by = 0.7f64;
+        let dos = 0.5 * discrete(&[-0.7, 1.2], &[0.25, 0.6]) + triangular(0.5, 1.0);
+        let moved = dos.shifted(by);
+        assert_eq!(moved.support().unwrap(), dos.support().unwrap().shifted(by));
+        assert_relative_eq!(moved.discrete().resonances()[0].eps, -0.7 + by);
+        for nu in [-4.0, -1.1, 0.2, 2.4, 3.3] {
+            assert_relative_eq!(
+                moved.continuous_at(nu + by),
+                dos.continuous_at(nu),
+                max_relative = 1e-12
+            );
+        }
+    }
+
+    #[test]
+    fn conv_of_mirrored_is_mirrored_conv() {
+        // A(ω_a - ν) ⊛ B(ω_b - ν) is (A ⊛ B)(ω_a + ω_b - ν). A power law edge reflected
+        // to the top of its support sends conv() down the side it is otherwise never
+        // asked for.
+        let (a, b) = (powerlaw(0.0, -0.5, 1.0), triangular(0.0, 1.0));
+        let (omega_a, omega_b) = (0.4, -0.1);
+        let direct = a.conv(&b, None).mirrored(omega_a + omega_b);
+        let reflected = a.mirrored(omega_a).conv(&b.mirrored(omega_b), None);
+        let support = direct.support().unwrap();
+        let (got, want) = (reflected.support().unwrap(), support);
+        assert_relative_eq!(got.min(), want.min(), max_relative = 1e-15);
+        assert_relative_eq!(got.max(), want.max(), max_relative = 1e-15);
+        for i in 1..60 {
+            let nu = support.min() + support.length() * (i as f64) / 60.0;
+            assert_relative_eq!(
+                reflected.continuous_at(nu),
+                direct.continuous_at(nu),
+                max_relative = 1e-8
             );
         }
     }

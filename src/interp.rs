@@ -3,7 +3,7 @@
 use crate::ContinuousSF;
 use crate::segment::Segment;
 use crate::singularity::Singularity;
-use crate::util::{chebyshev_coeffs, clenshaw_chebyshev};
+use crate::util::{alternating_sign, chebyshev_coeffs, clenshaw_chebyshev};
 
 /// Chebyshev expansion of a function over one interval.
 #[derive(Debug, Clone)]
@@ -183,6 +183,35 @@ impl ContinuousSF for InterpolatedSF {
             singularities: self.singularities.iter().map(|s| s.shifted(by)).collect(),
         })
     }
+    fn mirrored(&self, omega: f64) -> Box<dyn ContinuousSF> {
+        Box::new(InterpolatedSF {
+            support: self.support.mirrored(omega),
+            // `regular()` finds a panel by scanning upwards, so the order is reversed and
+            // not only each panel moved. Within a panel $x \mapsto -x$, and
+            // $T_k(-x) = (-1)^k T_k(x)$ turns the sign of every odd coefficient.
+            panels: self
+                .panels
+                .iter()
+                .rev()
+                .map(|p| Panel {
+                    mid: omega - p.mid,
+                    coeffs: p
+                        .coeffs
+                        .iter()
+                        .enumerate()
+                        .map(|(k, c)| alternating_sign(k) * c)
+                        .collect(),
+                    ..p.clone()
+                })
+                .collect(),
+            singularities: self
+                .singularities
+                .iter()
+                .rev()
+                .map(|s| s.mirrored(omega))
+                .collect(),
+        })
+    }
 }
 
 #[cfg(test)]
@@ -212,6 +241,9 @@ mod tests {
         }
         fn shifted(&self, _by: f64) -> Box<dyn ContinuousSF> {
             unimplemented!("the test double is never displaced")
+        }
+        fn mirrored(&self, _omega: f64) -> Box<dyn ContinuousSF> {
+            unimplemented!("the test double is never reflected")
         }
     }
 

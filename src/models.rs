@@ -10,6 +10,18 @@ use special::Elliptic;
 use std::f64::consts::{PI, SQRT_2};
 use std::sync::Arc;
 
+/// Images of `singularities` under the reflection $\nu \mapsto \omega - \nu$, in ascending
+/// order of position like the originals.
+fn mirrored_in_order<const N: usize>(
+    singularities: &[Singularity; N],
+    omega: f64,
+) -> [Singularity; N] {
+    // The reflection reverses the order of the points
+    let mut out = singularities.each_ref().map(|s| s.mirrored(omega));
+    out.reverse();
+    out
+}
+
 //
 // Discrete DOS
 //
@@ -89,6 +101,12 @@ impl ContinuousSF for FlatDOS {
             ..self.clone()
         })
     }
+    fn mirrored(&self, omega: f64) -> Box<dyn ContinuousSF> {
+        Box::new(FlatDOS {
+            eps: omega - self.eps,
+            ..self.clone()
+        })
+    }
 }
 
 /// Returns normalized flat density of states, optionally with smooth, Fermi-like band edges.
@@ -140,6 +158,12 @@ impl ContinuousSF for GaussianDOS {
     fn shifted(&self, by: f64) -> Box<dyn ContinuousSF> {
         Box::new(GaussianDOS {
             eps: self.eps + by,
+            ..self.clone()
+        })
+    }
+    fn mirrored(&self, omega: f64) -> Box<dyn ContinuousSF> {
+        Box::new(GaussianDOS {
+            eps: omega - self.eps,
             ..self.clone()
         })
     }
@@ -215,6 +239,13 @@ impl ContinuousSF for SemicircleDOS {
             ..self.clone()
         })
     }
+    fn mirrored(&self, omega: f64) -> Box<dyn ContinuousSF> {
+        Box::new(SemicircleDOS {
+            eps: omega - self.eps,
+            edges: mirrored_in_order(&self.edges, omega),
+            ..self.clone()
+        })
+    }
 }
 
 /// Returns normalized semicircle (Wigner) density of states.
@@ -274,6 +305,16 @@ impl ContinuousSF for PowerLawDOS {
         Box::new(PowerLawDOS {
             edges: self.edges.shifted(by),
             law: self.law.shifted(by),
+            singular: self.singular,
+        })
+    }
+    fn mirrored(&self, omega: f64) -> Box<dyn ContinuousSF> {
+        // A band running up from its edge becomes one running down to it. Nothing here
+        // needs w > 0 once constructed: the edge is a point and a segment, and the term
+        // has the same coefficient on either side.
+        Box::new(PowerLawDOS {
+            edges: self.edges.mirrored(omega),
+            law: self.law.mirrored(omega),
             singular: self.singular,
         })
     }
@@ -346,6 +387,13 @@ impl ContinuousSF for PseudogapDOS {
             edges: self.edges.shifted(by),
             law: self.law.shifted(by),
             marker: self.marker.as_ref().map(|s| s.shifted(by)),
+        })
+    }
+    fn mirrored(&self, omega: f64) -> Box<dyn ContinuousSF> {
+        Box::new(PseudogapDOS {
+            edges: self.edges.mirrored(omega),
+            law: self.law.mirrored(omega),
+            marker: self.marker.as_ref().map(|s| s.mirrored(omega)),
         })
     }
 }
@@ -424,6 +472,13 @@ impl ContinuousSF for ChainDOS {
         Box::new(ChainDOS {
             eps: self.eps + by,
             edges: self.edges.each_ref().map(|s| s.shifted(by)),
+            ..self.clone()
+        })
+    }
+    fn mirrored(&self, omega: f64) -> Box<dyn ContinuousSF> {
+        Box::new(ChainDOS {
+            eps: omega - self.eps,
+            edges: mirrored_in_order(&self.edges, omega),
             ..self.clone()
         })
     }
@@ -507,6 +562,13 @@ impl ContinuousSF for BetheDOS {
         Box::new(BetheDOS {
             eps: self.eps + by,
             edges: self.edges.each_ref().map(|s| s.shifted(by)),
+            ..self.clone()
+        })
+    }
+    fn mirrored(&self, omega: f64) -> Box<dyn ContinuousSF> {
+        Box::new(BetheDOS {
+            eps: omega - self.eps,
+            edges: mirrored_in_order(&self.edges, omega),
             ..self.clone()
         })
     }
@@ -596,6 +658,14 @@ impl ContinuousSF for SquareDOS {
             eps: self.eps + by,
             edges: self.edges.shifted(by),
             singularity: self.singularity.each_ref().map(|s| s.shifted(by)),
+            ..self.clone()
+        })
+    }
+    fn mirrored(&self, omega: f64) -> Box<dyn ContinuousSF> {
+        Box::new(SquareDOS {
+            eps: omega - self.eps,
+            edges: self.edges.mirrored(omega),
+            singularity: mirrored_in_order(&self.singularity, omega),
             ..self.clone()
         })
     }
@@ -693,6 +763,17 @@ impl ContinuousSF for TriangularDOS {
             eps: self.eps + by,
             edges: self.edges.shifted(by),
             singularity: self.singularity.each_ref().map(|s| s.shifted(by)),
+            ..self.clone()
+        })
+    }
+    fn mirrored(&self, omega: f64) -> Box<dyn ContinuousSF> {
+        // The one asymmetric band: A(ω) depends on (ω-ε)/t, so the reflection is the
+        // same band with ε at its image and t of the opposite sign
+        Box::new(TriangularDOS {
+            eps: omega - self.eps,
+            t: -self.t,
+            edges: self.edges.mirrored(omega),
+            singularity: mirrored_in_order(&self.singularity, omega),
             ..self.clone()
         })
     }
@@ -815,6 +896,14 @@ impl ContinuousSF for HoneycombDOS {
             eps: self.eps + by,
             edges: self.edges.shifted(by),
             singularities: self.singularities.each_ref().map(|s| s.shifted(by)),
+            ..self.clone()
+        })
+    }
+    fn mirrored(&self, omega: f64) -> Box<dyn ContinuousSF> {
+        Box::new(HoneycombDOS {
+            eps: omega - self.eps,
+            edges: self.edges.mirrored(omega),
+            singularities: mirrored_in_order(&self.singularities, omega),
             ..self.clone()
         })
     }
@@ -965,6 +1054,14 @@ impl ContinuousSF for LiebDOS {
             eps: self.eps + by,
             edges: self.edges.shifted(by),
             singularities: self.singularities.each_ref().map(|s| s.shifted(by)),
+            ..self.clone()
+        })
+    }
+    fn mirrored(&self, omega: f64) -> Box<dyn ContinuousSF> {
+        Box::new(LiebDOS {
+            eps: omega - self.eps,
+            edges: self.edges.mirrored(omega),
+            singularities: mirrored_in_order(&self.singularities, omega),
             ..self.clone()
         })
     }
