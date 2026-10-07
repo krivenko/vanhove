@@ -552,7 +552,7 @@ fn subtracted<G: Fn(f64) -> f64>(part: &Part, g: G, segment: Segment, tol: f64) 
         segment,
         tol,
     )
-    .unwrap_or(0.0)
+    .map_or(0.0, |integral| integral.value)
 }
 
 /// $\int S_p(\nu) S_q(\omega-\nu) d\nu$ over `segment`, without a quadrature.
@@ -1142,11 +1142,17 @@ mod tests {
         for r in [0.4f64, 0.49, 0.4999, 0.49999, 0.4999999, 0.499999999, 0.5] {
             let a = crate::models::pseudogap(0.0, r, 1.0);
             let moment = |sf: &crate::SpectralFunction| {
-                sf.integrate(|omega: f64| omega * omega, None).unwrap()
+                sf.integrate(|omega: f64| omega * omega, None)
+                    .unwrap()
+                    .value
             };
             let one = moment(&a);
             let c = a.conv(&a, None);
-            assert_relative_eq!(c.integrate(|_| 1.0, None).unwrap(), 1.0, epsilon = 1e-8);
+            assert_relative_eq!(
+                c.integrate(|_| 1.0, None).unwrap().value,
+                1.0,
+                epsilon = 1e-8
+            );
             assert_relative_eq!(moment(&c), 2.0 * one, max_relative = 1e-8);
         }
     }

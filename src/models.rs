@@ -1025,7 +1025,9 @@ mod tests {
     use approx::assert_relative_eq;
 
     fn compute_moment(dos: &SpectralFunction, order: i32) -> f64 {
-        dos.integrate(|omega| omega.powi(order), None).unwrap()
+        dos.integrate(|omega| omega.powi(order), None)
+            .unwrap()
+            .value
     }
 
     /// Moments $M_n = \sum_{k=0}^n \binom{n}{k} \epsilon^{n-k} \mu_k$ of orders 0..=6 of a
@@ -1755,12 +1757,12 @@ mod tests {
             let weight = a.total_weight() * b.total_weight();
             assert_relative_eq!(c.total_weight(), weight, max_relative = 1e-9);
             assert_relative_eq!(
-                c.integrate(|_| 1.0, None).unwrap(),
+                c.integrate(|_| 1.0, None).unwrap().value,
                 weight,
                 max_relative = 1e-7,
             );
             // The first moment adds, which no amount of structure should disturb
-            let mean = |sf: &SpectralFunction| sf.integrate(|w: f64| w, None).unwrap();
+            let mean = |sf: &SpectralFunction| sf.integrate(|w: f64| w, None).unwrap().value;
             assert_relative_eq!(
                 mean(&c),
                 mean(&a) * b.total_weight() + a.total_weight() * mean(&b),
@@ -1798,7 +1800,7 @@ mod tests {
         assert_relative_eq!(sc.total_weight(), 1.0, max_relative = 1e-9);
         assert!(sc.discrete().is_empty());
         assert_relative_eq!(
-            sc.integrate(|_| 1.0, None).unwrap(),
+            sc.integrate(|_| 1.0, None).unwrap().value,
             1.0,
             max_relative = 1e-8
         );
@@ -1812,7 +1814,8 @@ mod tests {
         for (order, known) in [(2i32, 6.0f64), (4, 90.0), (6, 1860.0)] {
             let moment = sc
                 .integrate(|omega: f64| (omega - eps).powi(order), None)
-                .unwrap();
+                .unwrap()
+                .value;
             assert_relative_eq!(moment, known * t.powi(order), max_relative = 1e-7);
         }
     }

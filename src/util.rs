@@ -9,6 +9,7 @@ use bilby::{
     integrate_semi_infinite_lower, integrate_semi_infinite_upper,
 };
 
+use crate::Integral;
 use crate::segment::Segment;
 
 /// Dispatch for the power function $u^r$ with a fixed exponent `r`.
@@ -161,7 +162,7 @@ pub fn integrate_by_subtraction<S, I, G>(
     g: G,
     segment: Segment,
     tol: f64,
-) -> Result<f64, QuadratureError>
+) -> Result<Integral<f64>, QuadratureError>
 where
     S: Fn(f64) -> f64,
     I: Fn(Segment) -> f64,
@@ -173,13 +174,13 @@ where
     // infinite at the point the subtraction leaves nothing finite behind. Both fall
     // back to the integral of the bare product.
     if !segment.contains(point) {
-        return Ok(bilby_integrate(|x| s(x) * g(x), segment, tol)?.value);
+        return bilby_integrate(|x| s(x) * g(x), segment, tol).map(Integral::from_quadrature);
     }
     let g_point = g(point);
     if !g_point.is_finite() {
-        return Ok(bilby_integrate(|x| s(x) * g(x), segment, tol)?.value);
+        return bilby_integrate(|x| s(x) * g(x), segment, tol).map(Integral::from_quadrature);
     }
-    let bounded = bilby_integrate(
+    let mut out = Integral::from_quadrature(bilby_integrate(
         |x| {
             if x == point {
                 0.0
@@ -189,9 +190,9 @@ where
         },
         segment,
         tol,
-    )?
-    .value;
-    Ok(bounded + g_point * s_integral(segment))
+    )?);
+    out.value += g_point * s_integral(segment);
+    Ok(out)
 }
 
 /// The whole row $\binom{n}{0}, \binom{n}{1}, \ldots, \binom{n}{n}$.

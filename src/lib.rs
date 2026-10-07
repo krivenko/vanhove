@@ -17,6 +17,7 @@ use std::ops::{Add, Mul, Neg, Sub};
 use std::sync::Arc;
 
 use bilby::QuadratureError;
+use bilby::result::QuadratureResult;
 use num_complex::Complex64;
 
 use crate::discrete::DiscreteSF;
@@ -87,14 +88,14 @@ pub mod theory {}
 /// let dos = SpectralFunction::from_continuous(SqrtBand::new(0.0));
 ///
 /// // The band is normalized, and its first moment is 3/5
-/// assert!((dos.integrate(|_| 1.0, None).unwrap() - 1.0).abs() < 1e-12);
-/// assert!((dos.integrate(|omega| omega, None).unwrap() - 0.6).abs() < 1e-12);
+/// assert!((dos.integrate(|_| 1.0, None).unwrap().value - 1.0).abs() < 1e-12);
+/// assert!((dos.integrate(|omega| omega, None).unwrap().value - 0.6).abs() < 1e-12);
 ///
 /// // It convolves like any model of the crate's own, the singular structure of the
 /// // result derived from the band edge it was given
 /// let twice = dos.conv(&dos, None);
-/// assert!((twice.integrate(|_| 1.0, None).unwrap() - 1.0).abs() < 1e-9);
-/// assert!((twice.integrate(|omega| omega, None).unwrap() - 1.2).abs() < 1e-9);
+/// assert!((twice.integrate(|_| 1.0, None).unwrap().value - 1.0).abs() < 1e-9);
+/// assert!((twice.integrate(|omega| omega, None).unwrap().value - 1.2).abs() < 1e-9);
 /// assert_eq!(twice.support().unwrap(), Segment::new(0.0, 2.0));
 /// ```
 pub trait ContinuousSF: Send + Sync {
@@ -129,6 +130,47 @@ pub struct SpectralFunction {
     // Continuous contributions with their weights.
     // Invariant: all weights are non-zero and no two entries share a contribution.
     continuous: Vec<(Arc<dyn ContinuousSF>, f64)>,
+}
+
+/// Integral computed by quadrature, with an estimate of its absolute error.
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[non_exhaustive]
+pub struct Integral<T> {
+    /// Value of the integral.
+    pub value: T,
+    /// Estimated absolute error of `value`. A complex integral has the errors of its real
+    /// and imaginary parts estimated separately.
+    pub error_estimate: T,
+    /// Whether every quadrature the integral is made of has reached the requested
+    /// tolerance.
+    pub converged: bool,
+}
+
+impl Integral<f64> {
+    /// An integral known exactly.
+    pub(crate) fn exact(value: f64) -> Integral<f64> {
+        Integral {
+            value,
+            error_estimate: 0.0,
+            converged: true,
+        }
+    }
+
+    /// What bilby reports for one quadrature.
+    pub(crate) fn from_quadrature(result: QuadratureResult<f64>) -> Integral<f64> {
+        Integral {
+            value: result.value,
+            error_estimate: result.error_estimate,
+            converged: result.converged,
+        }
+    }
+
+    /// Add `other` scaled by `weight`.
+    pub(crate) fn add_scaled(&mut self, other: &Integral<f64>, weight: f64) {
+        self.value += weight * other.value;
+        self.error_estimate += weight.abs() * other.error_estimate;
+        self.converged &= other.converged;
+    }
 }
 
 /// Multiply spectral function by a real number from the right.
@@ -413,8 +455,9 @@ impl SpectralFunction {
     /// Integrate the spectral function $A(\omega)$ against a real-valued function
     /// $f(\omega)$.
     ///
-    /// The integral $\int A(\omega)f(\omega)d\omega$ is computed to the absolute
-    /// tolerance `tol`, which defaults to $10^{-10}$.
+    /// The integral $\int A(\omega)f(\omega)d\omega$ is assembled from several
+    /// quadratures, each computed to the absolute tolerance `tol`, which defaults to
+    /// $10^{-10}$. [`Integral::converged`] tells whether all of them have reached it.
     ///
     /// `f` must be finite everywhere on [`SpectralFunction::support()`]. The tolerance is
     /// otherwise reached only as far as `f` is smooth: a jump at a frequency where
@@ -423,24 +466,26 @@ impl SpectralFunction {
         &self,
         f: F,
         tol: Option<f64>,
-    ) -> Result<f64, QuadratureError> {
-        let mut result = 0.0f64;
-
+    ) -> Result<Integral<f64>, QuadratureError> {
         // Discrete spectral contributions
+        let mut discrete = 0.0f64;
         for r in self.discrete.iter() {
-            result += r.weight * f(r.eps);
+            discrete += r.weight * f(r.eps);
         }
+        let mut result = Integral::exact(discrete);
 
         // Continuous spectral contributions
         // ∫A(ω)f(ω)dω = ∫R(ω)f(ω)dω + ∑_p ∫S_p(ω)[f(ω) - f(Ω_p)]dω + ∑_p f(Ω_p) ∫S_p(ω)dω
         let tol = tol.unwrap_or(1e-10);
         for (csf, w) in &self.continuous {
-            let mut res_contrib = 0.0f64;
             let support = csf.support();
 
             // Integrate the regular part, ∫R(ω)f(ω)dω
-            res_contrib +=
-                util::bilby_integrate(|omega| csf.regular(omega) * f(omega), support, tol)?.value;
+            let mut res_contrib = Integral::from_quadrature(util::bilby_integrate(
+                |omega| csf.regular(omega) * f(omega),
+                support,
+                tol,
+            )?);
 
             // Add integrals of the asymptotics
             for sing in csf.singularities() {
@@ -448,7 +493,7 @@ impl SpectralFunction {
                     continue;
                 }
                 // ∫S_p(ω)[f(ω) - f(Ω_p)]dω + f(Ω_p)∫S_p(ω)dω
-                res_contrib += util::integrate_by_subtraction(
+                let asympt = util::integrate_by_subtraction(
                     sing.position(),
                     |omega| sing.value(omega),
                     |stretch| sing.integral(stretch),
@@ -456,9 +501,10 @@ impl SpectralFunction {
                     support,
                     tol,
                 )?;
+                res_contrib.add_scaled(&asympt, 1.0);
             }
 
-            result += w * res_contrib;
+            result.add_scaled(&res_contrib, *w);
         }
         Ok(result)
     }
@@ -468,14 +514,21 @@ impl SpectralFunction {
     ///
     /// The real and imaginary parts of $\int A(\omega)f(\omega)d\omega$ are computed
     /// separately, each to the absolute tolerance `tol` and under the conditions
-    /// [`SpectralFunction::integrate()`] places on a real-valued integrand.
+    /// [`SpectralFunction::integrate()`] places on a real-valued integrand. The real and
+    /// imaginary parts of [`Integral::error_estimate`] belong to the respective parts of
+    /// the integral, and [`Integral::converged`] holds only if both parts have converged.
     pub fn integrate_complex<F: Fn(f64) -> Complex64>(
         &self,
         f: F,
         tol: Option<f64>,
-    ) -> Result<Complex64, QuadratureError> {
-        Ok(self.integrate(|omega| f(omega).re, tol)?
-            + Complex64::I * self.integrate(|omega| f(omega).im, tol)?)
+    ) -> Result<Integral<Complex64>, QuadratureError> {
+        let re = self.integrate(|omega| f(omega).re, tol)?;
+        let im = self.integrate(|omega| f(omega).im, tol)?;
+        Ok(Integral {
+            value: Complex64::new(re.value, im.value),
+            error_estimate: Complex64::new(re.error_estimate, im.error_estimate),
+            converged: re.converged && im.converged,
+        })
     }
 
     /// Value of the broadened spectral function at a frequency `omega`.
@@ -497,7 +550,7 @@ impl SpectralFunction {
         omega: f64,
         delta: f64,
         tol: Option<f64>,
-    ) -> Result<f64, QuadratureError> {
+    ) -> Result<Integral<f64>, QuadratureError> {
         assert!(delta > 0.0, "broadening must be positive");
         let (weight, delta_sq) = (delta / PI, delta.powi(2));
         let f = |omega_prime: f64| -> f64 { weight / (delta_sq + (omega_prime - omega).powi(2)) };
@@ -512,6 +565,7 @@ mod tests {
     use crate::segment::Segment;
     use crate::util;
     use approx::{assert_abs_diff_eq, assert_relative_eq};
+    use num_complex::Complex64;
     use std::f64::consts::PI;
 
     #[test]
@@ -826,8 +880,12 @@ mod tests {
         // Moments of even order survive the substitution, the odd ones vanishing
         for order in [0, 2, 4] {
             assert_relative_eq!(
-                fast.integrate(|omega| omega.powi(order), None).unwrap(),
-                dos.integrate(|omega| omega.powi(order), None).unwrap(),
+                fast.integrate(|omega| omega.powi(order), None)
+                    .unwrap()
+                    .value,
+                dos.integrate(|omega| omega.powi(order), None)
+                    .unwrap()
+                    .value,
                 max_relative = 1e-10
             );
         }
@@ -906,7 +964,8 @@ mod tests {
         }
 
         // Moments obey M_n = Σ_k C(n,k) M_k^A M_{n-k}^B
-        let moment = |sf: &SpectralFunction, n: i32| sf.integrate(|w| w.powi(n), None).unwrap();
+        let moment =
+            |sf: &SpectralFunction, n: i32| sf.integrate(|w| w.powi(n), None).unwrap().value;
         for n in 0..=4usize {
             let c_row = util::binomials(n);
             let reference: f64 = (0..=n)
@@ -965,7 +1024,7 @@ mod tests {
         assert_relative_eq!(c.total_weight(), 1.0, max_relative = 1e-9);
         assert!(c.discrete().is_empty());
         assert_relative_eq!(
-            c.integrate(|_| 1.0, None).unwrap(),
+            c.integrate(|_| 1.0, None).unwrap().value,
             1.0,
             max_relative = 1e-9
         );
@@ -993,8 +1052,11 @@ mod tests {
     fn conv_moments_follow_the_binomial_rule() {
         let (a, b) = (chain(0.0, 1.0), semicircle(0.5, 2.0));
         let c = a.conv(&b, None);
-        let moment =
-            |sf: &SpectralFunction, n: i32| sf.integrate(|omega: f64| omega.powi(n), None).unwrap();
+        let moment = |sf: &SpectralFunction, n: i32| {
+            sf.integrate(|omega: f64| omega.powi(n), None)
+                .unwrap()
+                .value
+        };
         for n in 0..=4i32 {
             let c_row = util::binomials(n as usize);
             let want: f64 = (0..=n)
@@ -1019,13 +1081,13 @@ mod tests {
             max_relative = 1e-9
         );
         assert_relative_eq!(
-            c.integrate(|_| 1.0, None).unwrap(),
+            c.integrate(|_| 1.0, None).unwrap().value,
             a.total_weight() * b.total_weight(),
             max_relative = 1e-8
         );
 
         // The first moment adds, weighted
-        let mean = |sf: &SpectralFunction| sf.integrate(|w: f64| w, None).unwrap();
+        let mean = |sf: &SpectralFunction| sf.integrate(|w: f64| w, None).unwrap().value;
         assert_relative_eq!(
             mean(&c),
             mean(&a) * b.total_weight() + a.total_weight() * mean(&b),
@@ -1065,7 +1127,7 @@ mod tests {
                         .map(|(eps, w)| w * (delta / PI) / (delta.powi(2) + (omega - eps).powi(2)))
                         .sum::<f64>();
                 assert_relative_eq!(
-                    dos.broadened(omega, delta, None).unwrap(),
+                    dos.broadened(omega, delta, None).unwrap().value,
                     ref_value,
                     max_relative = 1e-10
                 );
@@ -1082,7 +1144,7 @@ mod tests {
         let ref_value = 1.0 / (PI * ((2.0 * t).powi(2) - (omega - eps).powi(2)).sqrt());
         for delta in [1e-4, 1e-6] {
             assert_relative_eq!(
-                dos.broadened(omega, delta, None).unwrap(),
+                dos.broadened(omega, delta, None).unwrap().value,
                 ref_value,
                 max_relative = 10.0 * delta
             );
@@ -1097,9 +1159,9 @@ mod tests {
         // for delta -> 0.
         let t = 2.0f64;
         let dos = square(0.0, t);
-        let mut prev = dos.broadened(0.0, 1e-2, None).unwrap();
+        let mut prev = dos.broadened(0.0, 1e-2, None).unwrap().value;
         for delta in [1e-3, 1e-4, 1e-5, 1e-6] {
-            let value = dos.broadened(0.0, delta, None).unwrap();
+            let value = dos.broadened(0.0, delta, None).unwrap().value;
             assert_relative_eq!(
                 value - prev,
                 10f64.ln() / (2.0 * PI.powi(2) * t),
@@ -1113,7 +1175,7 @@ mod tests {
     fn broadened_mixed() {
         let dos = 2.0 * discrete(&[-0.7, 1.2], &[0.25, 0.6]) + 5.0 * gaussian(1.4, 0.5);
         assert_relative_eq!(
-            dos.broadened(0.5, 1e-2, None).unwrap(),
+            dos.broadened(0.5, 1e-2, None).unwrap().value,
             // Reference value computed independently with mpmath (40 decimal digits).
             0.8138402146,
             epsilon = 1e-9
@@ -1124,5 +1186,39 @@ mod tests {
     #[should_panic(expected = "broadening must be positive")]
     fn broadened_zero_delta() {
         let _ = gaussian(1.4, 0.5).broadened(0.5, 0.0, None);
+    }
+
+    #[test]
+    fn integral_reports_convergence() {
+        // A discrete part is summed exactly
+        let d = discrete(&[-0.7, 1.2], &[0.25, 0.6]).integrate(|w| w * w, None);
+        let d = d.unwrap();
+        assert_relative_eq!(d.value, 0.25 * 0.49 + 0.6 * 1.44, max_relative = 1e-15);
+        assert_eq!(d.error_estimate, 0.0);
+        assert!(d.converged);
+
+        // A tolerance out of reach of f64 still yields a value, but not convergence
+        let g = gaussian(1.4, 0.5);
+        let reached = g.integrate(|_| 1.0, None).unwrap();
+        let missed = g.integrate(|_| 1.0, Some(1e-30)).unwrap();
+        assert!(reached.converged);
+        assert!(!missed.converged);
+        assert_relative_eq!(missed.value, 1.0, max_relative = 1e-12);
+
+        // A request the quadrature cannot make sense of is an error
+        assert!(g.integrate(|_| 1.0, Some(f64::NAN)).is_err());
+    }
+
+    #[test]
+    fn complex_integral_reports_its_parts_apart() {
+        // A rapidly oscillating imaginary part fails to converge, the real part does not
+        let dos = flat(0.3, 1.0, 0.0);
+        let integral = dos
+            .integrate_complex(|w| Complex64::new(1.0, (1e5 * w * w).cos()), None)
+            .unwrap();
+        assert!(!integral.converged);
+        assert_relative_eq!(integral.value.re, 1.0, max_relative = 1e-12);
+        assert!(integral.error_estimate.re < 1e-10);
+        assert!(integral.error_estimate.im > 1e-10);
     }
 }

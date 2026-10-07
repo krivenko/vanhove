@@ -70,6 +70,7 @@ assert_eq!(dos.total_weight(), 1.0);
 
 // First spectral moment ∫A(ω) ω dω
 let m1 = dos.integrate(|omega| omega, None).unwrap();
+assert!(m1.converged);
 
 // Retarded Green's function of a semicircular band at z = 0.5 + 10⁻³i,
 // just above the real axis
@@ -81,7 +82,9 @@ let g = semicircle(0.0, 2.0)
 
 `integrate()` takes an optional absolute tolerance (`1e-10` by default) and
 returns a `Result`, since the underlying adaptive quadrature refuses a request it
-cannot make sense of, such as a tolerance that is not a number.
+cannot make sense of, such as a tolerance that is not a number. A request it accepts
+yields an `Integral`, which contains the value, an estimate of its absolute error,
+and whether the tolerance has been reached.
 
 ## Documentation
 

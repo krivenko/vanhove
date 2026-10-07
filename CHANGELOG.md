@@ -34,6 +34,9 @@ All notable changes to this project will be documented in this file.
 - Adding a spectral function to one it shares a continuous contribution with sums
   the weights of that contribution rather than listing it twice, and drops it where
   the weights cancel.
+- `SpectralFunction::integrate()`, `integrate_complex()` and `broadened()` return an
+  `Integral`, holding the value with an estimate of its absolute error and whether
+  the quadratures it is made of have converged.
 
 ## [0.1.1] - 2026-09-10
 
