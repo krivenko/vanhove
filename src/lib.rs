@@ -247,6 +247,15 @@ impl SpectralFunction {
         &self.discrete
     }
 
+    /// Continuous contributions with their weights.
+    ///
+    /// A contribution added more than once is listed once, with its weights summed.
+    /// Only additions of the same instance of [`ContinuousSF`] count as repeats, so
+    /// separately built models of identical parameters are listed apart.
+    pub fn continuous(&self) -> impl Iterator<Item = (&dyn ContinuousSF, f64)> {
+        self.continuous.iter().map(|(csf, w)| (csf.as_ref(), *w))
+    }
+
     /// Support of the spectral function.
     ///
     /// It is the smallest segment $[\omega_{min}, \omega_{max}]$ containing the supports
@@ -530,6 +539,29 @@ mod tests {
         // Continuous contributions leave no trace in the discrete part
         assert!(d.find(1.4).is_none());
         assert!(gaussian(1.4, 0.5).discrete().is_empty());
+    }
+
+    #[test]
+    fn continuous_part() {
+        let band = chain(0.5, 1.0);
+        let dos = 2.0 * discrete(&[-0.7, 1.2], &[0.25, 0.6])
+            + 5.0 * gaussian(1.4, 0.5)
+            + band.clone()
+            + 0.5 * band.clone();
+
+        // A repeated contribution is listed once, with the weights summed
+        let parts: Vec<_> = dos.continuous().collect();
+        assert_eq!(parts.len(), 2);
+        assert_eq!(parts[0].1, 5.0);
+        assert_eq!(parts[1].1, 1.5);
+        assert_eq!(
+            parts[0].0.support(),
+            Segment::new(f64::NEG_INFINITY, f64::INFINITY)
+        );
+        assert_eq!(parts[1].0.support(), Segment::new(-1.5, 2.5));
+
+        // Discrete resonances leave no trace in the continuous part
+        assert_eq!(discrete(&[-0.7], &[1.0]).continuous().count(), 0);
     }
 
     #[test]

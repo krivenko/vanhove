@@ -18,6 +18,8 @@ All notable changes to this project will be documented in this file.
   part in closed form, `interp::InterpolatedSF`, and
   `SpectralFunction::from_continuous()`. A model defined outside the crate can
   now be turned into a spectral function.
+- `SpectralFunction::continuous()` lists the continuous contributions with their
+  weights.
 - `SpectralFunction` is `Send` and `Sync`, so that frequency scans can be spread
   over threads.
 - `segment::Segment`, a segment of the frequency axis.
