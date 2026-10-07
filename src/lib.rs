@@ -297,6 +297,9 @@ impl SpectralFunction {
     /// The asymptotics at each singular point follows from the asymptotic forms of
     /// $A$ and $B$. The regular part of the result is interpolated to the relative
     /// tolerance `tol`, which defaults to $10^{-12}$.
+    ///
+    /// Panics if both operands have continuous parts and any of them has an unbounded
+    /// support. A discrete part convolves with a continuous part of any support.
     pub fn conv(&self, other: &SpectralFunction, tol: Option<f64>) -> SpectralFunction {
         // $A \ast B$ splits four ways across the discrete and continuous parts of the
         // two operands. These are the two cross terms: a resonance of one operand
