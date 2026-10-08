@@ -49,12 +49,13 @@ The numerical work is delegated to the
 | `kagome(eps, t)`            | Kagome lattice, flat band $\delta$-peak at a band edge              |
 | `lieb(eps, t)`              | Lieb lattice, flat band $\delta$-peak at the band center            |
 
-Every model is normalized to unit spectral weight. Spectral functions can be scaled
-by real numbers, negated, added and subtracted, so mixed discrete/continuous spectra
-are built by simple arithmetic. They can also be displaced in frequency
-(`shifted()`), reflected (`mirrored()`), convolved (`conv()`) and broadened by a
-Lorentzian (`broadened()`). `precomputed()` replaces a regular part that is
-expensive to evaluate with a Chebyshev interpolation of it.
+Every model except `discrete()` is normalized to unit spectral weight. Spectral
+functions can be scaled by real numbers, negated, added and subtracted, so mixed
+discrete/continuous spectra are built by simple arithmetic. They can also be
+displaced in frequency (`shifted()`), reflected (`mirrored()`) and convolved
+(`conv()`). `broadened()` evaluates a Lorentzian-broadened spectral function at a
+given frequency, and `precomputed()` replaces a regular part that is expensive to
+evaluate with a Chebyshev interpolation of it.
 
 A model defined outside the crate implements the `ContinuousSF` trait, supplying
 its support, its regular part and the closed form of each singular part, and
@@ -96,6 +97,7 @@ let z = Complex64::new(0.5, 1e-3);
 let g = semicircle(0.0, 2.0)
     .integrate_complex(|omega| 1.0 / (z - omega), None)
     .unwrap();
+assert!(g.value.im < 0.0);
 
 // Two linear chains convolve into the square lattice
 let sq = chain(0.0, 1.0).conv(&chain(0.0, 1.0), None);
@@ -106,7 +108,7 @@ assert!((sq.continuous_at(1.0) - square(0.0, 1.0).continuous_at(1.0)).abs() < 1e
 returns a `Result`, since the underlying adaptive quadrature refuses a request it
 cannot make sense of, such as a tolerance that is not a number. A request it accepts
 yields an `Integral`, which contains the value, an estimate of its absolute error,
-and whether the tolerance has been reached.
+and whether each quadrature it is assembled from has reached the tolerance.
 
 `SpectralFunction` is `Send` and `Sync`, so a frequency scan can be spread over
 threads, each evaluating `continuous_at()`, `integrate()` or `broadened()` at
