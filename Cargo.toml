@@ -4,7 +4,7 @@ version = "0.1.1"
 edition = "2024"
 rust-version = "1.93"
 authors = ["Igor Krivenko <iskrivenko@proton.me>"]
-description = "Model densities of states with integrable van Hove singularities and accurate integration of spectral functions"
+description = "Model densities of states with integrable van Hove singularities, their convolutions, and accurate integration of spectral functions"
 categories = ["science", "mathematics"]
 keywords = ["physics", "dos", "model", "numerical", "integration"]
 

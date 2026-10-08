@@ -6,8 +6,8 @@ https://github.com/krivenko/vanhove/actions/workflows/CI.yml)
 [![docs.rs](https://docs.rs/vanhove/badge.svg)](https://docs.rs/vanhove)
 [![license](https://img.shields.io/badge/license-MIT%20or%20Apache--2.0-blue.svg)](#license)
 
-Model densities of states with integrable van Hove singularities, and accurate
-integration of spectral functions.
+Model densities of states with integrable van Hove singularities, their
+convolutions, and accurate integration of spectral functions.
 
 Many quantities in condensed matter physics are frequency integrals
 $\int A(\omega) f(\omega) d\omega$ of a spectral function $A(\omega)$ against
@@ -49,20 +49,37 @@ The numerical work is delegated to the
 | `kagome(eps, t)`            | Kagome lattice, flat band $\delta$-peak at a band edge              |
 | `lieb(eps, t)`              | Lieb lattice, flat band $\delta$-peak at the band center            |
 
-Every model is normalized to unit spectral weight. They can be scaled by real
-numbers, negated, added and subtracted, so mixed discrete/continuous spectra are
-built by simple arithmetic.
+Every model is normalized to unit spectral weight. Spectral functions can be scaled
+by real numbers, negated, added and subtracted, so mixed discrete/continuous spectra
+are built by simple arithmetic. They can also be displaced in frequency
+(`shifted()`), reflected (`mirrored()`), convolved (`conv()`) and broadened by a
+Lorentzian (`broadened()`). `precomputed()` replaces a regular part that is
+expensive to evaluate with a Chebyshev interpolation of it.
+
+A model defined outside the crate implements the `ContinuousSF` trait, supplying
+its support, its regular part and the closed form of each singular part, and
+`SpectralFunction::from_continuous()` turns it into a spectral function.
+
+## Convolution
+
+`conv()` computes the convolution $\int A(\nu) B(\omega - \nu) d\nu$ of two
+spectral functions. The singular structure of the result is derived in closed
+form: its singular points are the pairwise sums of the frequencies where either
+operand stops being smooth, and the asymptotics at each of them follows from those
+of the operands. Only the smooth remainder of the convolution is interpolated, so
+the result can be integrated and convolved again like any built-in model. The
+continuous parts of both operands must have bounded supports.
 
 ## Usage
 
 ```toml
 [dependencies]
-vanhove = "0.1"
+vanhove = "0.2"
 ```
 
 ```rust
 use num_complex::Complex64;
-use vanhove::models::{discrete, semicircle, square};
+use vanhove::models::{chain, discrete, semicircle, square};
 
 // 80% square-lattice band plus 20% of a single discrete level at ω = 3
 let dos = 0.8 * square(0.0, 1.0) + 0.2 * discrete(&[3.0], &[1.0]);
@@ -71,6 +88,7 @@ assert_eq!(dos.total_weight(), 1.0);
 // First spectral moment ∫A(ω) ω dω
 let m1 = dos.integrate(|omega| omega, None).unwrap();
 assert!(m1.converged);
+assert!((m1.value - 0.6).abs() < 1e-10);
 
 // Retarded Green's function of a semicircular band at z = 0.5 + 10⁻³i,
 // just above the real axis
@@ -78,6 +96,10 @@ let z = Complex64::new(0.5, 1e-3);
 let g = semicircle(0.0, 2.0)
     .integrate_complex(|omega| 1.0 / (z - omega), None)
     .unwrap();
+
+// Two linear chains convolve into the square lattice
+let sq = chain(0.0, 1.0).conv(&chain(0.0, 1.0), None);
+assert!((sq.continuous_at(1.0) - square(0.0, 1.0).continuous_at(1.0)).abs() < 1e-9);
 ```
 
 `integrate()` takes an optional absolute tolerance (`1e-10` by default) and
@@ -86,9 +108,15 @@ cannot make sense of, such as a tolerance that is not a number. A request it acc
 yields an `Integral`, which contains the value, an estimate of its absolute error,
 and whether the tolerance has been reached.
 
+`SpectralFunction` is `Send` and `Sync`, so a frequency scan can be spread over
+threads, each evaluating `continuous_at()`, `integrate()` or `broadened()` at
+frequencies of its own.
+
 ## Documentation
 
-API documentation is available at <https://docs.rs/vanhove>.
+API documentation is available at <https://docs.rs/vanhove>. The mathematics
+behind the splitting, `integrate()` and `conv()` is laid out in the
+[`theory`](https://docs.rs/vanhove/latest/vanhove/theory/index.html) module.
 
 Formulas in the docs are rendered with KaTeX, so building them locally requires
 the extra header:
