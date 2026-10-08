@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.2.0] - Unreleased
+## [0.2.0] - 2026-10-08
 
 ### Added
 
@@ -53,6 +53,6 @@ All notable changes to this project will be documented in this file.
 
 Initial public release.
 
-[0.2.0]: https://github.com/krivenko/vanhove/compare/v0.1.1...HEAD
+[0.2.0]: https://github.com/krivenko/vanhove/releases/tag/v0.2.0
 [0.1.1]: https://github.com/krivenko/vanhove/releases/tag/v0.1.1
 [0.1.0]: https://github.com/krivenko/vanhove/releases/tag/v0.1.0
